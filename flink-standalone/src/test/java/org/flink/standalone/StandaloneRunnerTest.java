@@ -1,0 +1,178 @@
+package org.flink.standalone;
+
+import org.flink.harness.Mode;
+import org.flink.harness.StandaloneWorkflow;
+import org.flink.harness.WorkflowResult;
+import org.flink.test.DemoFunctions;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.List;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+@SuppressWarnings("unchecked")
+class StandaloneRunnerTest {
+
+    private static final List<String> SAMPLE_LINES = List.of(
+            "Alice,book,2,12.50",
+            "Bob,pen,0,2.00",
+            "Alice,notebook,1,8.00",
+            "Charlie,eraser,3,1.50",
+            "Bob,marker,4,3.00",
+            "Alice,pen,1,5.00");
+
+    @Test
+    void runReturnsAccumOutputs() {
+        WorkflowResult result = StandaloneRunner.run(SAMPLE_LINES, Mode.CONTINUOUS);
+        List<?> accum = result.outputs().get("accum");
+        assertThat((List<Object>) accum).containsExactly(
+                "customer=Alice orders=1 total=25.00",
+                "customer=Alice orders=2 total=33.00",
+                "customer=Charlie orders=1 total=4.50",
+                "customer=Bob orders=1 total=12.00",
+                "customer=Alice orders=3 total=38.00");
+    }
+
+    @Test
+    void runReturnsReportOutputs() {
+        WorkflowResult result = StandaloneRunner.run(SAMPLE_LINES, Mode.CONTINUOUS);
+        List<?> report = result.outputs().get("report");
+        assertThat((List<Object>) report).containsExactly(
+                "product=book qty=2 total=25.00",
+                "product=notebook qty=1 total=8.00",
+                "product=eraser qty=3 total=4.50",
+                "product=marker qty=4 total=12.00",
+                "product=pen qty=1 total=5.00");
+    }
+
+    @Test
+    void runReturnsSideOutputs() {
+        WorkflowResult result = StandaloneRunner.run(SAMPLE_LINES, Mode.CONTINUOUS);
+        List<?> rejected = result.sideOutputs().get(
+                new WorkflowResult.SideOutputKey<>("route", DemoFunctions.REJECTED_TAG));
+        assertThat(rejected).hasSize(1);
+        DemoFunctions.ParsedOrder order = (DemoFunctions.ParsedOrder) rejected.get(0);
+        assertThat(order.customer()).isEqualTo("Bob");
+        assertThat(order.product()).isEqualTo("pen");
+        assertThat(order.quantity()).isEqualTo(0);
+    }
+
+    @Test
+    void runReturnsMetrics() {
+        WorkflowResult result = StandaloneRunner.run(SAMPLE_LINES, Mode.CONTINUOUS);
+        assertThat(result.metrics()).containsKey("parse");
+        assertThat(result.metrics()).containsKey("route");
+        assertThat(result.metrics()).containsKey("accum");
+        assertThat(result.metrics()).containsKey("report");
+        assertThat(result.metrics().get("parse")).containsKey("parsedCount");
+        assertThat(result.metrics().get("parse").get("parsedCount")).isEqualTo(6L);
+        assertThat(result.metrics().get("route").get("good")).isEqualTo(5L);
+        assertThat(result.metrics().get("accum").get("aggregated")).isEqualTo(5L);
+        assertThat(result.metrics().get("report").get("reported")).isEqualTo(5L);
+    }
+
+    @Test
+    void continuousAccumulatesAcrossProcessCalls() {
+        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS, false);
+        try {
+            WorkflowResult first = wf.process(List.of("Alice,book,2,12.50"), "parse");
+            assertThat(first.outputs().get("accum")).containsExactly(
+                    "customer=Alice orders=1 total=25.00");
+
+            WorkflowResult second = wf.process(List.of("Alice,pen,1,5.00"), "parse");
+            assertThat(second.outputs().get("accum")).containsExactly(
+                    "customer=Alice orders=2 total=30.00");
+        } finally {
+            wf.close();
+        }
+    }
+
+    @Test
+    void transientModeClearsStateBetweenRuns() {
+        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.TRANSIENT, false);
+        try {
+            WorkflowResult first = wf.process(List.of("Alice,book,2,12.50", "Alice,pen,1,5.00"), "parse");
+            assertThat(first.outputs().get("accum")).containsExactly(
+                    "customer=Alice orders=1 total=25.00",
+                    "customer=Alice orders=2 total=30.00");
+
+            WorkflowResult second = wf.process(List.of("Alice,book,2,12.50", "Alice,pen,1,5.00"), "parse");
+            assertThat(second.outputs().get("accum")).containsExactly(
+                    "customer=Alice orders=1 total=25.00",
+                    "customer=Alice orders=2 total=30.00");
+        } finally {
+            wf.close();
+        }
+    }
+
+    @Test
+    void clearStateResetsAccumulator() {
+        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS, false);
+        try {
+            wf.process(List.of("Alice,book,2,12.50"), "parse");
+            wf.clearState("accum");
+            WorkflowResult afterClear = wf.process(List.of("Alice,pen,1,5.00"), "parse");
+            assertThat(afterClear.outputs().get("accum")).containsExactly(
+                    "customer=Alice orders=1 total=5.00");
+        } finally {
+            wf.close();
+        }
+    }
+
+    @Test
+    void clearStateAllResetsEverything() {
+        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS, false);
+        try {
+            wf.process(List.of("Alice,book,2,12.50", "Bob,pen,1,3.00"), "parse");
+            wf.clearStateAll();
+            WorkflowResult afterClear = wf.process(List.of("Alice,pen,1,5.00"), "parse");
+            assertThat(afterClear.outputs().get("accum")).containsExactly(
+                    "customer=Alice orders=1 total=5.00");
+        } finally {
+            wf.close();
+        }
+    }
+
+    @Test
+    void clearMetricsResetsCounters() {
+        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS, false);
+        try {
+            wf.process(List.of("Alice,book,2,12.50"), "parse");
+            wf.clearMetrics("parse");
+            WorkflowResult afterClear = wf.process(List.of("Bob,pen,1,3.00"), "parse");
+            assertThat(afterClear.metrics().get("parse").get("parsedCount")).isEqualTo(1L);
+        } finally {
+            wf.close();
+        }
+    }
+
+    @Test
+    void getWorkflowReturnsDagWithTypes() {
+        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS, false);
+        var nodes = wf.getWorkflow();
+        assertThat(nodes).hasSize(4);
+        assertThat(nodes.stream().filter(n -> n.functionId().equals("parse")).findFirst().get().successors())
+                .containsExactly("route");
+        assertThat(nodes.stream().filter(n -> n.functionId().equals("route")).findFirst().get().successors())
+                .containsExactly("accum", "report");
+    }
+
+    @Test
+    void getFunctionIdsReturnsAllIds() {
+        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS, false);
+        assertThat(wf.getFunctionIds()).containsExactlyInAnyOrder("parse", "route", "accum", "report");
+    }
+
+    @Test
+    void runFromFile(@TempDir Path tempDir) throws IOException {
+        Path inputFile = tempDir.resolve("input.csv");
+        Files.write(inputFile, SAMPLE_LINES);
+        List<String> lines = Files.readAllLines(inputFile);
+        WorkflowResult result = StandaloneRunner.run(lines, Mode.CONTINUOUS);
+        assertThat(result.outputs().get("accum")).isNotEmpty();
+    }
+}

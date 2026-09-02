@@ -1,0 +1,89 @@
+package org.flink.harness;
+
+import org.apache.flink.streaming.api.TimerService;
+import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
+import org.apache.flink.util.OutputTag;
+import org.flink.harness.runtime.RecordingCollector;
+
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Harness wrapping a {@link KeyedProcessFunction}: keyed access via the bound edge selector
+ * and {@code #getCurrentKey()}. Timers unsupported in v1.
+ */
+public final class KeyedProcessFunctionHarness extends FunctionHarness {
+
+    private final KeyedProcessFunction<Object, Object, Object> function;
+    private final KeyedProcessFunction<Object, Object, Object>.Context context;
+    private final List<Object> mainOutputs = new ArrayList<>();
+    private final RecordingCollector<Object> mainCollector = new RecordingCollector<>(mainOutputs);
+    private final Map<OutputTag<?>, List<Object>> sideOutputs = new LinkedHashMap<>();
+    private final String inputType;
+    private final String outputType;
+
+    @SuppressWarnings("unchecked")
+    public KeyedProcessFunctionHarness(String id, KeyedProcessFunction<?, ?, ?> function, boolean threadSafe, String inputType, String outputType) {
+        super(id, threadSafe);
+        this.function = (KeyedProcessFunction<Object, Object, Object>) function;
+        this.inputType = inputType;
+        this.outputType = outputType;
+        this.context = this.function.new Context() {
+            @Override
+            public Long timestamp() {
+                return null;
+            }
+
+            @Override
+            public TimerService timerService() {
+                throw new UnsupportedOperationException("timers are not supported in flink-harness v1");
+            }
+
+            @Override
+            public <X> void output(OutputTag<X> outputTag, X value) {
+                sideOutputs.computeIfAbsent(outputTag, t -> new ArrayList<>()).add(value);
+            }
+
+            @Override
+            public Object getCurrentKey() {
+                return currentKey();
+            }
+        };
+    }
+
+    @Override
+    protected FunctionResult<?> invokeUnchecked(Object element) {
+        mainOutputs.clear();
+        sideOutputs.clear();
+        try {
+            function.processElement(element, context, mainCollector);
+        } catch (Exception e) {
+            throw new RuntimeException("processElement failed in " + getId(), e);
+        }
+        Map<OutputTag<?>, List<?>> sideCopy = new LinkedHashMap<>();
+        sideOutputs.forEach((tag, list) -> sideCopy.put(tag, new ArrayList<>(list)));
+        return new FunctionResult<>(List.copyOf(mainOutputs), sideCopy, metricsSnapshot());
+    }
+
+    @Override
+    protected org.apache.flink.api.common.functions.RichFunction unwrap() {
+        return function;
+    }
+
+    @Override
+    public boolean requiresKeyedEdge() {
+        return true;
+    }
+
+    @Override
+    public String inputTypeName() {
+        return inputType;
+    }
+
+    @Override
+    public String outputTypeName() {
+        return outputType;
+    }
+}
