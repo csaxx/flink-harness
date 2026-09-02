@@ -92,8 +92,12 @@ validate the harness approach:
 ### Phase 7 — Polish
 - [ ] README.md usage example with relevant information for consumers
 - [ ] JavaDoc on public API surface
-- [ ] Injection for `flink-test` pom to not publish test deps into standalone
-- [ ] Cross-module `@SuppressWarnings("unchecked")` audit (verify only in 4 helpers)
+### Phase 7 — Polish (completed)
+- [x] `README.md` — usage example, feature matrix, build commands, architecture diagram
+- [x] JavaDoc audit — all public API classes have adequate documentation
+- [x] `@SuppressWarnings("unchecked")` audit — confirmed confined to 4 boundary helpers + state store internals
+- [x] flink-test's `flink-harness` dep is `test` scope — no leak into flink-standalone
+- [x] DependencyTreeTest verifies no banned artifacts (flink-test-utils, flink-clients, flink-runtime-test)
 
 ## Dependency key
 
@@ -118,4 +122,4 @@ validate the harness approach:
 
 ## Current step in progress
 
-Phase 7 — Polish (README, JavaDoc, audit)
+None — all phases complete.
