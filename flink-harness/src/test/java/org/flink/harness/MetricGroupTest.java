@@ -1,7 +1,7 @@
 package org.flink.harness;
 
 import org.apache.flink.metrics.Counter;
-import org.flink.harness.runtime.StandaloneMetricGroup;
+import org.flink.harness.internal.StandaloneMetricGroup;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;

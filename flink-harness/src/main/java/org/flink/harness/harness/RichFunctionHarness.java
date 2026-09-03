@@ -1,10 +1,11 @@
-package org.flink.harness;
+package org.flink.harness.harness;
 
 import org.apache.flink.api.common.functions.RichFunction;
 import org.apache.flink.api.common.functions.RichFilterFunction;
 import org.apache.flink.api.common.functions.RichFlatMapFunction;
 import org.apache.flink.api.common.functions.RichMapFunction;
-import org.flink.harness.runtime.RecordingCollector;
+import org.flink.harness.FunctionResult;
+import org.flink.harness.internal.RecordingCollector;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -59,7 +60,7 @@ public final class RichFunctionHarness extends FunctionHarness {
     }
 
     @Override
-    protected RichFunction unwrap() {
+    public RichFunction unwrap() {
         return function;
     }
 

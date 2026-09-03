@@ -5,6 +5,7 @@ import org.apache.flink.metrics.Counter;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
+import org.flink.harness.harness.ProcessFunctionHarness;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

@@ -2,13 +2,13 @@ package org.flink.test;
 
 import org.apache.flink.api.java.functions.KeySelector;
 import org.flink.harness.Edge;
-import org.flink.harness.KeyedProcessFunctionHarness;
 import org.flink.harness.Mode;
-import org.flink.harness.ProcessFunctionHarness;
-import org.flink.harness.RichFunctionHarness;
 import org.flink.harness.StandaloneWorkflow;
 import org.flink.harness.WorkflowBuilder;
 import org.flink.harness.WorkflowResult;
+import org.flink.harness.harness.KeyedProcessFunctionHarness;
+import org.flink.harness.harness.ProcessFunctionHarness;
+import org.flink.harness.harness.RichFunctionHarness;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

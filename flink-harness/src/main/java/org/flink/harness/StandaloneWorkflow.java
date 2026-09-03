@@ -2,6 +2,8 @@ package org.flink.harness;
 
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.util.OutputTag;
+import org.flink.harness.harness.FunctionHarness;
+import org.flink.harness.internal.SideOutputActivation;
 
 import java.util.ArrayDeque;
 import java.util.Deque;

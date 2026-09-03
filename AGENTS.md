@@ -109,9 +109,13 @@ artifacts slip into the production scope. The test shells out to
 All operators run with parallelism-1 semantics (single "subtask"). No key
 redistribution or repartitioning between edges.
 
-### Package
+### Packages
 
-`org.flink.harness` for the shipped library (`flink-harness` module).
+| Package | Audience |
+|---|---|
+| `org.flink.harness` | Consumer API — `WorkflowBuilder`, `StandaloneWorkflow`, `WorkflowResult`, `WorkflowNode`, `FunctionResult`, `Mode`, `Edge` |
+| `org.flink.harness.harness` | Harnesses — `FunctionHarness` base + `ProcessFunctionHarness` / `KeyedProcessFunctionHarness` / `RichFunctionHarness`; `HarnessFactory` (public, not API) |
+| `org.flink.harness.internal` | Implementation — `StandaloneRuntimeContext`, in-memory state store, collectors, metric groups, `SideOutputActivation`. Do not import; public only because Java package visibility does not cross packages. |
 
 ## Agent directives
 

@@ -31,6 +31,7 @@ validate the harness approach:
 | 2026-09-02 | State accessors resolve backing map lazily per operation | Fixed cross-key bleed found by tests: captured map bound wrong key |
 | 2026-09-02 | Keyed functions as workflow entrypoint require entry KeySelector via registerKeyedFunction overload | Otherwise open() fails loudly at first invocation (discovered by tests) |
 | 2026-09-02 | State descriptor serializers prepared via ExecutionConfig | getDefaultValue() needs initialized serializer (found by tests) |
+| 2026-09-03 | Three-package layout: root consumer API / harness / internal | Separates consumer-facing types from harness machinery and inert internals; internal classes public-by-necessity, `internal` package name is the convention barrier |
 
 ## Stepwise roadmap
 

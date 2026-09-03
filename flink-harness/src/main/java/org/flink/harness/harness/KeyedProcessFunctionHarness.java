@@ -1,9 +1,10 @@
-package org.flink.harness;
+package org.flink.harness.harness;
 
 import org.apache.flink.streaming.api.TimerService;
-import org.apache.flink.streaming.api.functions.ProcessFunction;
+import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.util.OutputTag;
-import org.flink.harness.runtime.RecordingCollector;
+import org.flink.harness.FunctionResult;
+import org.flink.harness.internal.RecordingCollector;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -11,13 +12,13 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Harness wrapping a non-keyed {@link ProcessFunction}. Context instantiated through the
- * function instance (permitted by Flink's inner-class pattern). Timers unsupported in v1.
+ * Harness wrapping a {@link KeyedProcessFunction}: keyed access via the bound edge selector
+ * and {@code #getCurrentKey()}. Timers unsupported in v1.
  */
-public final class ProcessFunctionHarness extends FunctionHarness {
+public final class KeyedProcessFunctionHarness extends FunctionHarness {
 
-    private final ProcessFunction<Object, Object> function;
-    private final ProcessFunction<Object, Object>.Context context;
+    private final KeyedProcessFunction<Object, Object, Object> function;
+    private final KeyedProcessFunction<Object, Object, Object>.Context context;
     private final List<Object> mainOutputs = new ArrayList<>();
     private final RecordingCollector<Object> mainCollector = new RecordingCollector<>(mainOutputs);
     private final Map<OutputTag<?>, List<Object>> sideOutputs = new LinkedHashMap<>();
@@ -25,9 +26,9 @@ public final class ProcessFunctionHarness extends FunctionHarness {
     private final String outputType;
 
     @SuppressWarnings("unchecked")
-    public ProcessFunctionHarness(String id, ProcessFunction<?, ?> function, boolean threadSafe, String inputType, String outputType) {
+    public KeyedProcessFunctionHarness(String id, KeyedProcessFunction<?, ?, ?> function, boolean threadSafe, String inputType, String outputType) {
         super(id, threadSafe);
-        this.function = (ProcessFunction<Object, Object>) function;
+        this.function = (KeyedProcessFunction<Object, Object, Object>) function;
         this.inputType = inputType;
         this.outputType = outputType;
         this.context = this.function.new Context() {
@@ -44,6 +45,11 @@ public final class ProcessFunctionHarness extends FunctionHarness {
             @Override
             public <X> void output(OutputTag<X> outputTag, X value) {
                 sideOutputs.computeIfAbsent(outputTag, t -> new ArrayList<>()).add(value);
+            }
+
+            @Override
+            public Object getCurrentKey() {
+                return currentKey();
             }
         };
     }
@@ -63,13 +69,13 @@ public final class ProcessFunctionHarness extends FunctionHarness {
     }
 
     @Override
-    protected org.apache.flink.api.common.functions.RichFunction unwrap() {
+    public org.apache.flink.api.common.functions.RichFunction unwrap() {
         return function;
     }
 
     @Override
     public boolean requiresKeyedEdge() {
-        return false;
+        return true;
     }
 
     @Override

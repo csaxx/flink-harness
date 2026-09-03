@@ -1,4 +1,4 @@
-package org.flink.harness.runtime;
+package org.flink.harness.internal;
 
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.groups.OperatorIOMetricGroup;

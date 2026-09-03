@@ -1,11 +1,14 @@
-package org.flink.harness;
+package org.flink.harness.harness;
 
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.functions.RichFunction;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.util.OutputTag;
-import org.flink.harness.runtime.InMemoryKeyedStateStore;
-import org.flink.harness.runtime.StandaloneRuntimeContext;
+import org.flink.harness.Edge;
+import org.flink.harness.FunctionResult;
+import org.flink.harness.internal.InMemoryKeyedStateStore;
+import org.flink.harness.internal.StandaloneOperatorMetricGroup;
+import org.flink.harness.internal.StandaloneRuntimeContext;
 
 import java.util.List;
 import java.util.Map;
@@ -71,7 +74,7 @@ public abstract class FunctionHarness {
 
     /** Reset metrics counters (primary gauges/meters untouched). */
     public void clearMetrics() {
-        ((org.flink.harness.runtime.StandaloneOperatorMetricGroup) runtimeContext.getMetricGroup())
+        ((StandaloneOperatorMetricGroup) runtimeContext.getMetricGroup())
                 .resetCounters();
     }
 
@@ -82,7 +85,7 @@ public abstract class FunctionHarness {
     }
 
     public Map<String, Object> metricsSnapshot() {
-        return ((org.flink.harness.runtime.StandaloneOperatorMetricGroup) runtimeContext.getMetricGroup()).snapshot();
+        return ((StandaloneOperatorMetricGroup) runtimeContext.getMetricGroup()).snapshot();
     }
 
     /** Current key (bound when invoked through a keyed edge). */
@@ -124,7 +127,7 @@ public abstract class FunctionHarness {
     protected abstract FunctionResult<?> invokeUnchecked(Object element);
 
     /** Raw access to underlying function for lifecycle transitions. */
-    protected abstract RichFunction unwrap();
+    public abstract RichFunction unwrap();
 
     /** true for {@code KeyedProcessFunctionHarness} — must receive keyed edges only. */
     public abstract boolean requiresKeyedEdge();

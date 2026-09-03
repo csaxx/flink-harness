@@ -1,4 +1,4 @@
-package org.flink.harness;
+package org.flink.harness.harness;
 
 import org.apache.flink.api.common.functions.RichFilterFunction;
 import org.apache.flink.api.common.functions.RichFlatMapFunction;
@@ -7,10 +7,11 @@ import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 
-/** Factory into the right harness subtype per function class. */
-final class HarnessFactory {
+/** Factory into the right harness subtype per function class. Public for cross-package access from {@code WorkflowBuilder}; not part of the consumer API. */
+public final class HarnessFactory {
 
-    static FunctionHarness create(String id, Object function, boolean threadSafe, String inputType, String outputType) {
+    /** Create the appropriate harness for the given function instance. */
+    public static FunctionHarness create(String id, Object function, boolean threadSafe, String inputType, String outputType) {
         if (function instanceof ProcessFunction<?, ?> p) {
             return new ProcessFunctionHarness(id, p, threadSafe, inputType, outputType);
         }

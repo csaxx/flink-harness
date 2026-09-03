@@ -4,6 +4,9 @@ import org.apache.flink.api.common.functions.Function;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.util.OutputTag;
+import org.flink.harness.harness.FunctionHarness;
+import org.flink.harness.harness.HarnessFactory;
+import org.flink.harness.internal.SideOutputActivation;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
