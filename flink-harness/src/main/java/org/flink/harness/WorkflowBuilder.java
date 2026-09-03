@@ -22,7 +22,6 @@ import java.util.Set;
 public final class WorkflowBuilder {
 
     private final Mode mode;
-    private final boolean threadSafe;
     private final Map<String, Object> functions = new LinkedHashMap<>();
     private final Map<String, TypeInformation<?>> inputTypes = new LinkedHashMap<>();
     private final Map<String, TypeInformation<?>> outputTypes = new LinkedHashMap<>();
@@ -31,9 +30,8 @@ public final class WorkflowBuilder {
     private final Set<String> activatedOutputs = new LinkedHashSet<>();
     private final Set<SideOutputActivation> activatedSideOutputs = new LinkedHashSet<>();
 
-    public WorkflowBuilder(Mode mode, boolean threadSafe) {
+    public WorkflowBuilder(Mode mode) {
         this.mode = mode;
-        this.threadSafe = threadSafe;
     }
 
     // --------------------------------------------------------------------------------------------
@@ -164,7 +162,7 @@ public final class WorkflowBuilder {
             String id = entry.getKey();
             String inName = nameOrUnknown(inputTypes.get(id));
             String outName = nameOrUnknown(outputTypes.get(id));
-            harnesses.put(id, HarnessFactory.create(id, entry.getValue(), threadSafe, inName, outName));
+            harnesses.put(id, HarnessFactory.create(id, entry.getValue(), inName, outName));
         }
 
         // edge type validation

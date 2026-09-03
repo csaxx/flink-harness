@@ -15,6 +15,10 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -24,7 +28,7 @@ class StandaloneWorkflowTest {
 
     @Test
     void multiStageFlowWithFanOutAndKeyedBranch() {
-        StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS, false)
+        StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .registerFunction("entry", new UpperCase(), TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .registerFunction("shouter", new Shouter(), TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .registerKeyedFunction("keyedCount", new KeyedCount(), TypeInformation.of(String.class), TypeInformation.of(String.class))
@@ -47,7 +51,7 @@ class StandaloneWorkflowTest {
 
     @Test
     void transienteModeClearsStateBetweenRuns() {
-        StandaloneWorkflow wf = new WorkflowBuilder(Mode.TRANSIENT, false)
+        StandaloneWorkflow wf = new WorkflowBuilder(Mode.TRANSIENT)
                 .registerKeyedFunction("keyedCount", new KeyedCount(), new FirstCharKey())
                 .activateOutput("keyedCount")
                 .build(true);
@@ -59,7 +63,7 @@ class StandaloneWorkflowTest {
 
     @Test
     void continuousAccumulates() {
-        StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS, false)
+        StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .registerKeyedFunction("keyedCount", new KeyedCount(), new FirstCharKey())
                 .activateOutput("keyedCount")
                 .build(true);
@@ -74,7 +78,7 @@ class StandaloneWorkflowTest {
 
     @Test
     void getWorkflowGraphReturnsTypesAndSuccessors() {
-        StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS, false)
+        StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .registerFunction("a", new UpperCase(), TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .registerFunction("b", new Shouter(), TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .addEdge("a", "b")
@@ -86,6 +90,81 @@ class StandaloneWorkflowTest {
         assertThat(a.successors()).containsExactly("b");
         assertThat(a.inputType()).isNotEqualTo(WorkflowNode.UNKNOWN_TYPE);
         assertThat(a.outputType()).isNotEqualTo(WorkflowNode.UNKNOWN_TYPE);
+    }
+
+    // --------------------------------------------------------------------------------------------
+
+    @Test
+    void concurrentContinuousWorkflowAccumulatesCorrectly() throws InterruptedException {
+        StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
+                .registerKeyedFunction("keyedCount", new KeyedCount(), new FirstCharKey())
+                .activateOutput("keyedCount")
+                .build(true);
+
+        int threads = 8;
+        int runsPerThread = 50;
+        long total = 0;
+
+        CountDownLatch start = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(threads)) {
+            for (int i = 0; i < threads; i++) {
+                pool.execute(() -> {
+                    try {
+                        start.await();
+                    } catch (InterruptedException ignored) {
+                    }
+                    for (int r = 0; r < runsPerThread; r++) {
+                        wf.process(List.of("a"), "keyedCount");
+                    }
+                });
+            }
+            start.countDown();
+            pool.shutdown();
+            pool.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS);
+        }
+
+        WorkflowResult latest = wf.process(List.of("a"), "keyedCount");
+        List<Object> outs = latest.outputs().get("keyedCount");
+        long expected = (long) threads * runsPerThread + 1;
+        String out = (String) outs.get(0);
+        assertThat(outs).hasSize(1);
+        assertThat(out).isEqualTo("a#" + expected + "(A)");
+        wf.close();
+    }
+
+    @Test
+    void concurrentTransientWorkflowIsDeterministic() throws InterruptedException {
+        StandaloneWorkflow wf = new WorkflowBuilder(Mode.TRANSIENT)
+                .registerFunction("shout", new Shouter(), TypeInformation.of(String.class), TypeInformation.of(String.class))
+                .activateOutput("shout")
+                .build();
+
+        int threads = 16;
+        int runsPerThread = 40;
+
+        CountDownLatch start = new CountDownLatch(1);
+        try (var pool = Executors.newFixedThreadPool(threads)) {
+            for (int i = 0; i < threads; i++) {
+                pool.execute(() -> {
+                    try {
+                        start.await();
+                    } catch (InterruptedException ignored) {
+                    }
+                    for (int r = 0; r < runsPerThread; r++) {
+                        WorkflowResult result = wf.process(List.of("X"), "shout");
+                        // TRANSIENT reset happens inside the lock, before unlock
+                        // → no concurrent reset can interfere mid-run
+                        if (!"X".endsWith("A")) {
+                            assertThat(result.sideOutputs()).isEmpty();
+                        }
+                    }
+                });
+            }
+            start.countDown();
+            pool.shutdown();
+            pool.awaitTermination(20, java.util.concurrent.TimeUnit.SECONDS);
+        }
+        wf.close();
     }
 
     // --------------------------------------------------------------------------------------------

@@ -9,10 +9,10 @@ import org.flink.harness.FunctionResult;
 import org.flink.harness.internal.InMemoryKeyedStateStore;
 import org.flink.harness.internal.StandaloneOperatorMetricGroup;
 import org.flink.harness.internal.StandaloneRuntimeContext;
+import org.flink.harness.WorkflowNode;
 
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Base of all function harnesses. Handles open/close lifecyle, wire runtime context,
@@ -24,16 +24,13 @@ public abstract class FunctionHarness {
     private static final OpenContext OPEN_CONTEXT = new OpenContext() {};
 
     private final String id;
-    private final boolean useLock;
     private final StandaloneRuntimeContext runtimeContext;
     private final InMemoryKeyedStateStore stateStore;
-    private final ReentrantLock lock = new ReentrantLock();
     private boolean opened;
     private Object currentKey;
 
-    protected FunctionHarness(String id, boolean threadSafe) {
+    protected FunctionHarness(String id) {
         this.id = id;
-        this.useLock = threadSafe;
         this.runtimeContext = new StandaloneRuntimeContext(id);
         this.stateStore = runtimeContext.stateStore();
     }
@@ -93,21 +90,12 @@ public abstract class FunctionHarness {
         return currentKey;
     }
 
-    /** Invoke the wrapped function under the optional lock. Key is bound BEFORE open(),
+    /** Invoke the wrapped function. Key is bound BEFORE open(),
      * so keyed functions can initialize state handles from the bound key. */
     public final FunctionResult<?> processViaEdge(Object element, Edge edge) {
-        if (useLock) {
-            lock.lock();
-        }
-        try {
-            bindKey(element, edge);
-            openOnce();
-            return invokeUnchecked(element);
-        } finally {
-            if (useLock) {
-                lock.unlock();
-            }
-        }
+        bindKey(element, edge);
+        openOnce();
+        return invokeUnchecked(element);
     }
 
     // raw helper #2: KeySelector invocation — confined boundary

@@ -16,9 +16,9 @@ public final class StandaloneRunner {
 
     private StandaloneRunner() {}
 
-    /** Build the workflow graph (same topology as flink-test's DemoFunctions). */
-    public static StandaloneWorkflow buildWorkflow(Mode mode, boolean threadSafe) {
-        return new WorkflowBuilder(mode, threadSafe)
+    /** Build the workflow graph (same topology as flink-test's DemoFunctions). Thread-safe by default. */
+    public static StandaloneWorkflow buildWorkflow(Mode mode) {
+        return new WorkflowBuilder(mode)
                 .registerFunction("parse", new DemoFunctions.ParseFn())
                 .registerFunction("route", new DemoFunctions.RouteFn())
                 .registerKeyedFunction("accum", new DemoFunctions.AccumulateFn(),
@@ -40,7 +40,7 @@ public final class StandaloneRunner {
      * @return aggregated outputs, side outputs, and metrics
      */
     public static WorkflowResult run(List<String> csvLines, Mode mode) {
-        StandaloneWorkflow wf = buildWorkflow(mode, false);
+        StandaloneWorkflow wf = buildWorkflow(mode);
         try {
             return wf.process(csvLines, "parse");
         } finally {

@@ -21,7 +21,7 @@ Wraps your Flink functions (`ProcessFunction`, `KeyedProcessFunction`, `RichMapF
 ```java
 import org.flink.harness.*;
 
-StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS, false)
+StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
     .registerFunction("parse", new MyParseFn())
     .registerKeyedFunction("accum", new MyKeyedFn(), input -> input.key())
     .addEdge("parse", "accum")
@@ -54,7 +54,7 @@ Unresolved generics fail loudly at `build()`; opt out with `build(true)` if need
 
 ### Thread safety
 
-`new WorkflowBuilder(Mode.CONTINUOUS, true)` wraps each function invocation in a lock.
+Workflows are thread-safe by default: the entire `process()` call (and `clear*`/`close()`) is guarded by a single workflow-level lock. Multiple workflows can run concurrently; concurrent calls on the same workflow serialize.
 
 ### Clearing state / metrics
 

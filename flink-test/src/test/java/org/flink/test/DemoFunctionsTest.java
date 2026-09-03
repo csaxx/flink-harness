@@ -25,7 +25,7 @@ class DemoFunctionsTest {
     @SuppressWarnings("unchecked")
     void parseFnParsesCsv() {
         RichFunctionHarness harness = new RichFunctionHarness(
-                "parse", new DemoFunctions.ParseFn(), RichFunctionHarness.Kind.MAP, false, "String", "DemoFunctions.ParsedOrder");
+                "parse", new DemoFunctions.ParseFn(), RichFunctionHarness.Kind.MAP, "String", "DemoFunctions.ParsedOrder");
         harness.openOnce();
         DemoFunctions.ParsedOrder order = (DemoFunctions.ParsedOrder)
                 ((List<Object>) harness.processViaEdge("cust1,item,3,10.0", null).outputs()).get(0);
@@ -39,8 +39,7 @@ class DemoFunctionsTest {
     @Test
     @SuppressWarnings("unchecked")
     void routeFnRoutesGoodOrders() {
-        ProcessFunctionHarness harness = new ProcessFunctionHarness(
-                "route", new DemoFunctions.RouteFn(), false, "DemoFunctions.ParsedOrder", "DemoFunctions.ParsedOrder");
+        ProcessFunctionHarness harness = new ProcessFunctionHarness("route", new DemoFunctions.RouteFn(), "DemoFunctions.ParsedOrder", "DemoFunctions.ParsedOrder");
         DemoFunctions.ParsedOrder good = new DemoFunctions.ParsedOrder("c1", "p1", 2, 5.0);
         var result = harness.processViaEdge(good, null);
         assertThat((List<Object>) result.outputs()).containsExactly(good);
@@ -50,8 +49,7 @@ class DemoFunctionsTest {
     @Test
     @SuppressWarnings("unchecked")
     void routeFnRejectsBadOrders() {
-        ProcessFunctionHarness harness = new ProcessFunctionHarness(
-                "route", new DemoFunctions.RouteFn(), false, "DemoFunctions.ParsedOrder", "DemoFunctions.ParsedOrder");
+        ProcessFunctionHarness harness = new ProcessFunctionHarness("route", new DemoFunctions.RouteFn(), "DemoFunctions.ParsedOrder", "DemoFunctions.ParsedOrder");
         DemoFunctions.ParsedOrder bad = new DemoFunctions.ParsedOrder("c1", "p1", 0, 5.0);
         var result = harness.processViaEdge(bad, null);
         assertThat((List<Object>) result.outputs()).isEmpty();
@@ -61,8 +59,7 @@ class DemoFunctionsTest {
     @Test
     @SuppressWarnings("unchecked")
     void accumulateFnAccumulatesPerCustomer() {
-        KeyedProcessFunctionHarness harness = new KeyedProcessFunctionHarness(
-                "accum", new DemoFunctions.AccumulateFn(), false, "DemoFunctions.ParsedOrder", "String");
+        KeyedProcessFunctionHarness harness = new KeyedProcessFunctionHarness("accum", new DemoFunctions.AccumulateFn(), "DemoFunctions.ParsedOrder", "String");
         KeySelector<DemoFunctions.ParsedOrder, String> byCustomer = DemoFunctions.ParsedOrder::customer;
         Edge edge = new Edge("src", "accum", byCustomer);
 
@@ -82,8 +79,7 @@ class DemoFunctionsTest {
     @Test
     @SuppressWarnings("unchecked")
     void reportFnFormatsLine() {
-        ProcessFunctionHarness harness = new ProcessFunctionHarness(
-                "report", new DemoFunctions.ReportFn(), false, "DemoFunctions.ParsedOrder", "String");
+        ProcessFunctionHarness harness = new ProcessFunctionHarness("report", new DemoFunctions.ReportFn(), "DemoFunctions.ParsedOrder", "String");
         DemoFunctions.ParsedOrder order = new DemoFunctions.ParsedOrder("c1", "gadget", 3, 4.5);
         var result = harness.processViaEdge(order, null);
         assertThat((List<Object>) result.outputs()).containsExactly("product=gadget qty=3 total=13.50");
@@ -96,7 +92,7 @@ class DemoFunctionsTest {
     @Test
     @SuppressWarnings("unchecked")
     void fullWorkflowWithFanOut() {
-        StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS, false)
+        StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .registerFunction("parse", new DemoFunctions.ParseFn())
                 .registerFunction("route", new DemoFunctions.RouteFn())
                 .registerKeyedFunction("accum", new DemoFunctions.AccumulateFn(),

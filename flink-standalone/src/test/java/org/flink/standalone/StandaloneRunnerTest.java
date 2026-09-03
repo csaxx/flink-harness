@@ -77,7 +77,7 @@ class StandaloneRunnerTest {
 
     @Test
     void continuousAccumulatesAcrossProcessCalls() {
-        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS, false);
+        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS);
         try {
             WorkflowResult first = wf.process(List.of("Alice,book,2,12.50"), "parse");
             assertThat(first.outputs().get("accum")).containsExactly(
@@ -93,7 +93,7 @@ class StandaloneRunnerTest {
 
     @Test
     void transientModeClearsStateBetweenRuns() {
-        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.TRANSIENT, false);
+        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.TRANSIENT);
         try {
             WorkflowResult first = wf.process(List.of("Alice,book,2,12.50", "Alice,pen,1,5.00"), "parse");
             assertThat(first.outputs().get("accum")).containsExactly(
@@ -111,7 +111,7 @@ class StandaloneRunnerTest {
 
     @Test
     void clearStateResetsAccumulator() {
-        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS, false);
+        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS);
         try {
             wf.process(List.of("Alice,book,2,12.50"), "parse");
             wf.clearState("accum");
@@ -125,7 +125,7 @@ class StandaloneRunnerTest {
 
     @Test
     void clearStateAllResetsEverything() {
-        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS, false);
+        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS);
         try {
             wf.process(List.of("Alice,book,2,12.50", "Bob,pen,1,3.00"), "parse");
             wf.clearStateAll();
@@ -139,7 +139,7 @@ class StandaloneRunnerTest {
 
     @Test
     void clearMetricsResetsCounters() {
-        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS, false);
+        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS);
         try {
             wf.process(List.of("Alice,book,2,12.50"), "parse");
             wf.clearMetrics("parse");
@@ -152,7 +152,7 @@ class StandaloneRunnerTest {
 
     @Test
     void getWorkflowReturnsDagWithTypes() {
-        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS, false);
+        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS);
         var nodes = wf.getWorkflow();
         assertThat(nodes).hasSize(4);
         assertThat(nodes.stream().filter(n -> n.functionId().equals("parse")).findFirst().get().successors())
@@ -163,7 +163,7 @@ class StandaloneRunnerTest {
 
     @Test
     void getFunctionIdsReturnsAllIds() {
-        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS, false);
+        StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS);
         assertThat(wf.getFunctionIds()).containsExactlyInAnyOrder("parse", "route", "accum", "report");
     }
 

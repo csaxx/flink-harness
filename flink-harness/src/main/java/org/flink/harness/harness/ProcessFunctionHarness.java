@@ -26,8 +26,8 @@ public final class ProcessFunctionHarness extends FunctionHarness {
     private final String outputType;
 
     @SuppressWarnings("unchecked")
-    public ProcessFunctionHarness(String id, ProcessFunction<?, ?> function, boolean threadSafe, String inputType, String outputType) {
-        super(id, threadSafe);
+    public ProcessFunctionHarness(String id, ProcessFunction<?, ?> function, String inputType, String outputType) {
+        super(id);
         this.function = (ProcessFunction<Object, Object>) function;
         this.inputType = inputType;
         this.outputType = outputType;

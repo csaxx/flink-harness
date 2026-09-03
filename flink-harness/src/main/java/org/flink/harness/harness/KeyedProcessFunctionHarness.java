@@ -26,8 +26,8 @@ public final class KeyedProcessFunctionHarness extends FunctionHarness {
     private final String outputType;
 
     @SuppressWarnings("unchecked")
-    public KeyedProcessFunctionHarness(String id, KeyedProcessFunction<?, ?, ?> function, boolean threadSafe, String inputType, String outputType) {
-        super(id, threadSafe);
+    public KeyedProcessFunctionHarness(String id, KeyedProcessFunction<?, ?, ?> function, String inputType, String outputType) {
+        super(id);
         this.function = (KeyedProcessFunction<Object, Object, Object>) function;
         this.inputType = inputType;
         this.outputType = outputType;

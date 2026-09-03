@@ -11,12 +11,19 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Executable workflow graph built by {@link WorkflowBuilder}.
  * {@code process(inputs, entryId)} runs elements through the graph; see AGENTS.md for semantics.
+ *
+ * <p>Thread-safe by design: the entire {@link #process} call (and all clear/close operations)
+ * is guarded by a single lock. Concurrent {@code process} invocations serialize on the same
+ * workflow; separate workflow instances run without contention.
  */
 public final class StandaloneWorkflow {
+
+    private final ReentrantLock lock = new ReentrantLock();
 
     private final Map<String, FunctionHarness> harnesses;
     private final List<Edge> edges;
@@ -49,14 +56,17 @@ public final class StandaloneWorkflow {
     // execute
     // --------------------------------------------------------------------------------------------
 
-    /** Feed all elements through the graph starting at {@code entryFunctionId}. */
+    /** Feed all elements through the graph starting at {@code entryFunctionId}.
+     * Guarded by the workflow lock; in TRANSIENT mode the reset also happens within the lock. */
     public WorkflowResult process(List<?> inputs, String entryFunctionId) {
+        lock.lock();
         try {
             return doProcess(inputs, entryFunctionId);
         } finally {
             if (mode == Mode.TRANSIENT) {
                 resetTransient();
             }
+            lock.unlock();
         }
     }
 
@@ -165,19 +175,39 @@ public final class StandaloneWorkflow {
     // --------------------------------------------------------------------------------------------
 
     public void clearState(String functionId) {
-        require(functionId).clearState();
+        lock.lock();
+        try {
+            require(functionId).clearState();
+        } finally {
+            lock.unlock();
+        }
     }
 
     public void clearStateAll() {
-        harnesses.values().forEach(FunctionHarness::clearState);
+        lock.lock();
+        try {
+            harnesses.values().forEach(FunctionHarness::clearState);
+        } finally {
+            lock.unlock();
+        }
     }
 
     public void clearMetrics(String functionId) {
-        require(functionId).clearMetrics();
+        lock.lock();
+        try {
+            require(functionId).clearMetrics();
+        } finally {
+            lock.unlock();
+        }
     }
 
     public void clearMetricsAll() {
-        harnesses.values().forEach(FunctionHarness::clearMetrics);
+        lock.lock();
+        try {
+            harnesses.values().forEach(FunctionHarness::clearMetrics);
+        } finally {
+            lock.unlock();
+        }
     }
 
     private FunctionHarness require(String id) {
@@ -193,9 +223,14 @@ public final class StandaloneWorkflow {
     // --------------------------------------------------------------------------------------------
 
     public void close() {
-        if (!closed) {
-            closed = true;
-            harnesses.values().forEach(FunctionHarness::close);
+        lock.lock();
+        try {
+            if (!closed) {
+                closed = true;
+                harnesses.values().forEach(FunctionHarness::close);
+            }
+        } finally {
+            lock.unlock();
         }
     }
 

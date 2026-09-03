@@ -31,7 +31,7 @@ validate the harness approach:
 | 2026-09-02 | State accessors resolve backing map lazily per operation | Fixed cross-key bleed found by tests: captured map bound wrong key |
 | 2026-09-02 | Keyed functions as workflow entrypoint require entry KeySelector via registerKeyedFunction overload | Otherwise open() fails loudly at first invocation (discovered by tests) |
 | 2026-09-02 | State descriptor serializers prepared via ExecutionConfig | getDefaultValue() needs initialized serializer (found by tests) |
-| 2026-09-03 | Three-package layout: root consumer API / harness / internal | Separates consumer-facing types from harness machinery and inert internals; internal classes public-by-necessity, `internal` package name is the convention barrier |
+| 2026-09-03 | Thread safety: single workflow-level lock on StandaloneWorkflow; threadSafe param removed, Thread-safe by default | User concern: in TRANSIENT mode per-function locks let concurrent traversals interleave with the finally-reset. Workflow lock guarantees atomic process(); direct harness access deliberately unlocked |
 
 ## Stepwise roadmap
 
@@ -68,7 +68,7 @@ validate the harness approach:
 - [x] Entry of a keyed function directly: register `KeySelector` via `registerKeyedFunction(id, fn, selector)` overloads; otherwise clear error
 - [x] `getWorkflowNodes` → serializable DAG via `WorkflowNode`
 - [x] `clearState/clearMetrics` per-function and all; `TRANSIENT` try/finally reset
-- [x] Per-harness lock when `threadSafe=true`
+- [x] Workflow-level `ReentrantLock` on `StandaloneWorkflow` (thread-safe by default; direct harness access unlocked)
 
 ### Phase 4 — Demo job (flink-test) (completed)
 - [x] `DemoFunctions.java` — `ParsedOrder` record, `ParseFn` (RichMap), `RouteFn` (ProcessFunction, side output "rejected"), `AccumulateFn` (KeyedProcessFunction, per-customer ValueState for total+count), `ReportFn` (ProcessFunction)
@@ -79,7 +79,7 @@ validate the harness approach:
 - [x] `Edge` record made public (was package-private, needed by demo tests)
 
 ### Phase 5 — Standalone integration (flink-standalone) (completed)
-- [x] `StandaloneRunner.java` — public entry point with `buildWorkflow(mode, threadSafe)` and `run(csvLines, mode)` convenience methods
+- [x] `StandaloneRunner.java` — public entry point with `buildWorkflow(mode)` and `run(csvLines, mode)` convenience methods
 - [x] Sample input file `orders.csv` under `src/test/resources`
 - [x] 13 tests: outputs (accum/report), side outputs, metrics, CONTINUOUS accumulate across process calls, TRANSIENT clear, clearState/clearStateAll/clearMetrics, getWorkflow DAG, getFunctionIds, runFromFile
 - [x] `Edge` record made public (was package-private, needed by demo tests)

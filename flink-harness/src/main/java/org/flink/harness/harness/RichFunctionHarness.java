@@ -26,8 +26,8 @@ public final class RichFunctionHarness extends FunctionHarness {
     private final String inputType;
     private final String outputType;
 
-    public RichFunctionHarness(String id, RichFunction function, Kind kind, boolean threadSafe, String inputType, String outputType) {
-        super(id, threadSafe);
+    public RichFunctionHarness(String id, RichFunction function, Kind kind, String inputType, String outputType) {
+        super(id);
         this.function = function;
         this.kind = kind;
         this.inputType = inputType;

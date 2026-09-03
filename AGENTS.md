@@ -74,7 +74,7 @@ If you change any of these, update this section AND re-evaluate all code.
 ### WorkflowBuilder surface (API)
 
 ```java
-new WorkflowBuilder(mode, threadSafe)
+new WorkflowBuilder(mode)
   .registerFunction("id", functionInstance)           // ProcessFunction, RichMap, etc.
   .registerKeyedFunction("id", keyedFunctionInstance)
   .addEdge("srcId", "dstId")                          // untyped edge
@@ -91,8 +91,12 @@ try/finally).
 
 ### Thread safety
 
-- Per-function `ReentrantLock` when `threadSafe=true`.
-- Lock held during the entire `processElement` + collector flush.
+- Thread-safe by default. One `ReentrantLock` on each `StandaloneWorkflow` guards the
+  entire `process()` call and every `clear*`/`close()` operation (including the TRANSIENT
+  reset, executed within the lock in the same `try/finally` that eventually unlocks).
+- Multiple workflows do not contend; separate instances have separate locks.
+- Direct harness access (`harness.processViaEdge`) is deliberately unlocked — the workflow
+  is the only supported multithreaded entry point. |
 
 ### Dependency slimness
 

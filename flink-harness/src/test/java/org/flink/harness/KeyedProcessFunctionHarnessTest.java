@@ -18,7 +18,7 @@ class KeyedProcessFunctionHarnessTest {
     @Test
     void statePerKeyAndCurrentKeyExposure() {
         CountingKeyFn fn = new CountingKeyFn();
-        KeyedProcessFunctionHarness harness = new KeyedProcessFunctionHarness("count", fn, false, "String", "String");
+        KeyedProcessFunctionHarness harness = new KeyedProcessFunctionHarness("count", fn, "String", "String");
         KeySelector<String, String> selector = new KeySelector<String, String>() {
             @Override
             public String getKey(String value) {
@@ -41,7 +41,7 @@ class KeyedProcessFunctionHarnessTest {
     @Test
     void unkeyedEdgeFailsLoudlyAtRuntime() {
         CountingKeyFn fn = new CountingKeyFn();
-        KeyedProcessFunctionHarness harness = new KeyedProcessFunctionHarness("count", fn, false, "String", "String");
+        KeyedProcessFunctionHarness harness = new KeyedProcessFunctionHarness("count", fn, "String", "String");
         // no key bound → state access must fail with a clear message
         try {
             harness.processViaEdge("apple", null);
