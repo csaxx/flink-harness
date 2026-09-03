@@ -53,6 +53,16 @@ public abstract class FunctionHarness {
         }
     }
 
+    /** Open eagerly at build time. For keyed functions a dummy placeholder key is bound
+     * so state handle registration in open() cannot fail (the dummy entry is benign).
+     * Safe no-op if already opened. */
+    public void openOnceEager() {
+        if (!opened && requiresKeyedEdge()) {
+            stateStore.setCurrentKey(new Object());
+        }
+        openOnce();
+    }
+
     public void close() {
         if (opened) {
             try {

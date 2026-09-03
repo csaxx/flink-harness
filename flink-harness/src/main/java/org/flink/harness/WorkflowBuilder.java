@@ -29,9 +29,17 @@ public final class WorkflowBuilder {
     private final Map<String, KeySelector<?, ?>> entrySelectors = new LinkedHashMap<>();
     private final Set<String> activatedOutputs = new LinkedHashSet<>();
     private final Set<SideOutputActivation> activatedSideOutputs = new LinkedHashSet<>();
+    private boolean eagerInit;
 
     public WorkflowBuilder(Mode mode) {
         this.mode = mode;
+    }
+
+    /** Initializes (opens) all functions during {@link #build()} rather than lazily on the first
+     * element processed. Failures in {@code open()} are surfaced at build time. */
+    public WorkflowBuilder initializeAtBuild() {
+        this.eagerInit = true;
+        return this;
     }
 
     // --------------------------------------------------------------------------------------------
@@ -192,6 +200,11 @@ public final class WorkflowBuilder {
         }
 
         validateActivations(harnesses);
+        if (eagerInit) {
+            for (FunctionHarness harness : harnesses.values()) {
+                harness.openOnceEager();
+            }
+        }
         List<WorkflowNode> graph = buildGraph(harnesses, edges);
         return new StandaloneWorkflow(harnesses, edges, entrySelectors, activatedOutputs, activatedSideOutputs, mode, graph);
     }

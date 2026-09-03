@@ -31,7 +31,7 @@ validate the harness approach:
 | 2026-09-02 | State accessors resolve backing map lazily per operation | Fixed cross-key bleed found by tests: captured map bound wrong key |
 | 2026-09-02 | Keyed functions as workflow entrypoint require entry KeySelector via registerKeyedFunction overload | Otherwise open() fails loudly at first invocation (discovered by tests) |
 | 2026-09-02 | State descriptor serializers prepared via ExecutionConfig | getDefaultValue() needs initialized serializer (found by tests) |
-| 2026-09-03 | Thread safety: single workflow-level lock on StandaloneWorkflow; threadSafe param removed, Thread-safe by default | User concern: in TRANSIENT mode per-function locks let concurrent traversals interleave with the finally-reset. Workflow lock guarantees atomic process(); direct harness access deliberately unlocked |
+| 2026-09-03 | Eager init option: `WorkflowBuilder.initializeAtBuild()` opens all functions at build() time | Fail-fast open() validation, predictable startup; keyed functions get dummy key for state handle registration |
 
 ## Stepwise roadmap
 

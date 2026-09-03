@@ -75,6 +75,7 @@ If you change any of these, update this section AND re-evaluate all code.
 
 ```java
 new WorkflowBuilder(mode)
+  .initializeAtBuild()                                 // optional: open() all functions at build()
   .registerFunction("id", functionInstance)           // ProcessFunction, RichMap, etc.
   .registerKeyedFunction("id", keyedFunctionInstance)
   .addEdge("srcId", "dstId")                          // untyped edge

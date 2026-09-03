@@ -41,6 +41,10 @@ result.metrics()       // Map<functionId, Map<metricName, value>>
 - **`CONTINUOUS`** — metrics and state accumulate across `process()` calls (like real Flink)
 - **`TRANSIENT`** — everything cleared after each `process()` call (even on exception)
 
+### Lazy vs. eager initialization
+
+Functions open lazily on first element by default. `builder.initializeAtBuild()` opens all functions during `build()` (fail-fast `open()` errors, predictable startup):
+
 ### Type safety
 
 Register functions with explicit `TypeInformation` hints for compile-time-safe workflows:

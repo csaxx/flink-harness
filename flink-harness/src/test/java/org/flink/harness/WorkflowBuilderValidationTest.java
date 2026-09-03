@@ -66,6 +66,38 @@ class WorkflowBuilderValidationTest {
         assertThat(wf.getWorkflow().get(0).inputType()).isEqualTo(WorkflowNode.UNKNOWN_TYPE);
     }
 
+    @Test
+    void initializeAtBuildOpensFunctionsEagerly() {
+        WorkflowBuilder b = new WorkflowBuilder(Mode.CONTINUOUS);
+        b.initializeAtBuild()
+         .registerKeyedFunction("k", new KeyedFn());
+        // eager init sets a dummy key for the keyed function at build() time
+        StandaloneWorkflow wf = b.build(true);
+        assertThat(wf.getWorkflow()).hasSize(1);
+        wf.close(); // no exception → open succeeded
+    }
+
+    @Test
+    void initializeAtBuildSurfacesOpenFailuresAtBuildTime() {
+        FailingOpen fn = new FailingOpen();
+        WorkflowBuilder b = new WorkflowBuilder(Mode.CONTINUOUS);
+        b.initializeAtBuild().registerFunction("bad", fn);
+        assertThatThrownBy(b::build).isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("open() failed for bad");
+    }
+
+    private static final class FailingOpen extends ProcessFunction<Object, Object> {
+        @Override
+        public void open(org.apache.flink.api.common.functions.OpenContext context) {
+            throw new RuntimeException("expected failure");
+        }
+
+        @Override
+        public void processElement(Object value, Context ctx, Collector<Object> out) {
+            out.collect(value);
+        }
+    }
+
     private static final class Passive extends ProcessFunction<Object, Object> {
         @Override
         public void processElement(Object value, Context ctx, Collector<Object> out) {
