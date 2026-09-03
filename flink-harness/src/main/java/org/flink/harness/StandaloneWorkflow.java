@@ -1,9 +1,14 @@
 package org.flink.harness;
 
 import org.apache.flink.api.java.functions.KeySelector;
+import org.apache.flink.metrics.Counter;
+import org.apache.flink.metrics.Gauge;
+import org.apache.flink.metrics.Histogram;
+import org.apache.flink.metrics.Meter;
+import org.apache.flink.metrics.Metric;
 import org.apache.flink.util.OutputTag;
 import org.flink.harness.harness.FunctionHarness;
-import org.flink.harness.internal.SideOutputActivation;
+import org.flink.harness.internal.StandaloneMetricGroup;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -24,20 +29,19 @@ import java.util.concurrent.locks.ReentrantLock;
 public final class StandaloneWorkflow {
 
     private final ReentrantLock lock = new ReentrantLock();
-
     private final Map<String, FunctionHarness> harnesses;
     private final List<Edge> edges;
     private final Map<String, KeySelector<?, ?>> entrySelectors;
     private final Map<String, List<Edge>> outboundEdges;
     private final Set<String> activatedOutputs;
-    private final Set<SideOutputActivation> activatedSideOutputs;
+    private final Map<String, List<OutputTag<?>>> activatedSideOutputs;
     private final Mode mode;
     private final List<WorkflowNode> graph;
     private boolean closed;
 
     StandaloneWorkflow(Map<String, FunctionHarness> harnesses, List<Edge> edges,
             Map<String, KeySelector<?, ?>> entrySelectors,
-            Set<String> activatedOutputs, Set<SideOutputActivation> activatedSideOutputs,
+            Set<String> activatedOutputs, Map<String, List<OutputTag<?>>> activatedSideOutputs,
             Mode mode, List<WorkflowNode> graph) {
         this.harnesses = harnesses;
         this.edges = edges;
@@ -92,8 +96,9 @@ public final class StandaloneWorkflow {
             queue.add(new Invocation(entryFunctionId, input, entryEdge));
         }
 
+        // per-function accumulation
         Map<String, List<Object>> outputsAgg = new LinkedHashMap<>();
-        Map<WorkflowResult.SideOutputKey<?>, List<Object>> sideAgg = new LinkedHashMap<>();
+        Map<String, Map<OutputTag<?>, List<Object>>> sideAgg = new LinkedHashMap<>();
 
         while (!queue.isEmpty()) {
             Invocation inv = queue.poll();
@@ -118,29 +123,68 @@ public final class StandaloneWorkflow {
             }
         }
 
-        Map<String, Map<String, Object>> metrics = new LinkedHashMap<>();
+        // assemble per-function results (only functions with ≥1 of outputs/sideOutputs/metrics)
+        Map<String, FunctionResult<Object>> results = new LinkedHashMap<>();
         for (Map.Entry<String, FunctionHarness> entry : harnesses.entrySet()) {
-            metrics.put(entry.getKey(), entry.getValue().metricsSnapshot());
+            String id = entry.getKey();
+            List<Object> outs = List.copyOf(outputsAgg.getOrDefault(id, List.of()));
+            Map<OutputTag<?>, List<Object>> sides = sideAgg.getOrDefault(id, Map.of());
+            Map<String, Object> metricSnap = entry.getValue().metricsSnapshot();
+
+            boolean hasOutputs = !outs.isEmpty();
+            boolean hasSides = !sides.isEmpty();
+            boolean hasMetrics = !metricSnap.isEmpty();
+            if (hasOutputs || hasSides || hasMetrics) {
+                @SuppressWarnings("unchecked")
+                Map<OutputTag<?>, List<?>> sidesCasted = (Map<OutputTag<?>, List<?>>) (Map<?, ?>) sides;
+                results.put(id, new FunctionResult<>(outs, sidesCasted, metricSnap));
+            }
         }
 
-        return new WorkflowResult(outputsAgg, sideAgg, metrics);
+        Map<String, Object> aggregated = aggregateAllMetrics();
+        return new WorkflowResult(results, aggregated);
     }
 
+    @SuppressWarnings("unchecked")
     private void aggregateSideOutputs(String functionId, FunctionResult<?> result,
-            Map<WorkflowResult.SideOutputKey<?>, List<Object>> sideAgg) {
-        for (SideOutputActivation activation : activatedSideOutputs) {
-            if (!activation.functionId().equals(functionId)) {
-                continue;
-            }
-            OutputTag<?> tag = activation.tag();
+            Map<String, Map<OutputTag<?>, List<Object>>> sideAgg) {
+        List<OutputTag<?>> tags = activatedSideOutputs.get(functionId);
+        if (tags == null) {
+            return;
+        }
+        for (OutputTag<?> tag : tags) {
             List<?> values = result.sideOutputs().get(tag);
             if (values != null && !values.isEmpty()) {
-                sideAgg.computeIfAbsent(
-                                new WorkflowResult.SideOutputKey<>(functionId, tag),
-                                k -> new java.util.ArrayList<>())
-                        .addAll(values);
+                sideAgg.computeIfAbsent(functionId, k -> new LinkedHashMap<>())
+                        .computeIfAbsent(tag, k -> new java.util.ArrayList<>())
+                        .addAll((List<Object>) values);
             }
         }
+    }
+
+    /** Aggregate metrics across all harnesses: counters/meters/histograms summed, gauges last-wins. */
+    private Map<String, Object> aggregateAllMetrics() {
+        Map<String, Object> aggregated = new LinkedHashMap<>();
+        for (FunctionHarness harness : harnesses.values()) {
+            for (Map.Entry<String, Metric> entry : metricInstances(harness).entrySet()) {
+                String name = entry.getKey();
+                Metric metric = entry.getValue();
+                if (metric instanceof Gauge<?> gauge) {
+                    aggregated.put(name, gauge.getValue()); // last-wins; registration order is deterministic
+                } else if (metric instanceof Counter counter) {
+                    aggregated.merge(name, counter.getCount(), (a, b) -> ((Number) a).longValue() + ((Number) b).longValue());
+                } else if (metric instanceof Meter meter) {
+                    aggregated.merge(name, meter.getCount(), (a, b) -> ((Number) a).longValue() + ((Number) b).longValue());
+                } else if (metric instanceof Histogram histogram) {
+                    aggregated.merge(name, histogram.getCount(), (a, b) -> ((Number) a).longValue() + ((Number) b).longValue());
+                }
+            }
+        }
+        return aggregated;
+    }
+
+    private Map<String, Metric> metricInstances(FunctionHarness harness) {
+        return ((StandaloneMetricGroup) harness.unwrapMetricGroup()).metricInstances();
     }
 
     private void resetTransient() {

@@ -85,6 +85,11 @@ new WorkflowBuilder(mode)
   .build()
 ```
 
+`process()` returns `WorkflowResult(functionResults, aggregatedMetrics)` — `functionResults`
+is a `Map<functionId, FunctionResult<Object>>` for functions that produced at least one of
+outputs/sideOutputs/metrics; `aggregatedMetrics` is a flat cross-function map where
+counters/meters/histograms are summed and gauges last-wins.
+
 Modes: `CONTINUOUS` (metrics & state accumulate like real Flink; manual
 `clearState(id)` / `clearStateAll()` / `clearMetrics()`) and `TRANSIENT`
 (everything cleared after each `process()` call, including on exception via
@@ -120,7 +125,7 @@ redistribution or repartitioning between edges.
 |---|---|
 | `org.flink.harness` | Consumer API — `WorkflowBuilder`, `StandaloneWorkflow`, `WorkflowResult`, `WorkflowNode`, `FunctionResult`, `Mode`, `Edge` |
 | `org.flink.harness.harness` | Harnesses — `FunctionHarness` base + `ProcessFunctionHarness` / `KeyedProcessFunctionHarness` / `RichFunctionHarness`; `HarnessFactory` (public, not API) |
-| `org.flink.harness.internal` | Implementation — `StandaloneRuntimeContext`, in-memory state store, collectors, metric groups, `SideOutputActivation`. Do not import; public only because Java package visibility does not cross packages. |
+| `org.flink.harness.internal` | Implementation — `StandaloneRuntimeContext`, in-memory state store, collectors, metric groups. Do not import; public only because Java package visibility does not cross packages. |
 
 ## Agent directives
 

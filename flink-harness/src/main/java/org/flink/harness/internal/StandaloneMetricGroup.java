@@ -101,6 +101,23 @@ public class StandaloneMetricGroup implements MetricGroup {
         return out;
     }
 
+    /** Accessor returning the registered {@link Metric} instances with dotted names
+     * (kind preserved — needed for correct cross-function aggregation). */
+    public Map<String, Metric> metricInstances() {
+        Map<String, Metric> out = new LinkedHashMap<>();
+        collectInstances(out, "");
+        return out;
+    }
+
+    private void collectInstances(Map<String, Metric> out, String prefix) {
+        for (Map.Entry<String, Metric> entry : metrics.entrySet()) {
+            out.put(prefix + entry.getKey(), entry.getValue());
+        }
+        for (Map.Entry<String, StandaloneMetricGroup> child : children.entrySet()) {
+            child.getValue().collectInstances(out, prefix + child.getKey() + ".");
+        }
+    }
+
     private void collect(Map<String, Object> out, String prefix) {
         for (Map.Entry<String, Metric> entry : metrics.entrySet()) {
             out.put(prefix + entry.getKey(), extract(entry.getValue()));

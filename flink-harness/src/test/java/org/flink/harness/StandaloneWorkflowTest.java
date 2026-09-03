@@ -41,12 +41,11 @@ class StandaloneWorkflowTest {
 
         WorkflowResult result = wf.process(List.of("alpha", "apricot", "beta"), "entry");
 
-        assertThat(result.outputs().get("shouter")).containsExactly("ALPHA", "APRICOT", "BETA");
-        assertThat(result.outputs().get("keyedCount"))
+        assertThat(result.outputsOf("shouter")).containsExactly("ALPHA", "APRICOT", "BETA");
+        assertThat(result.outputsOf("keyedCount"))
                 .containsExactly("ALPHA#1(A)", "APRICOT#2(A)", "BETA#1(B)");
         // both ALPHA and BETA end with "A" → both routed to the side output
-        assertThat(result.sideOutputs().get(new WorkflowResult.SideOutputKey<>("shouter", SHOUT)))
-                .containsExactly("ALPHA", "BETA");
+        assertThat(result.sideOutputsOf("shouter", SHOUT)).containsExactly("ALPHA", "BETA");
     }
 
     @Test
@@ -56,9 +55,9 @@ class StandaloneWorkflowTest {
                 .activateOutput("keyedCount")
                 .build(true);
         WorkflowResult first = wf.process(List.of("a"), "keyedCount");
-        assertThat(first.outputs().get("keyedCount")).containsExactly("a#1(A)");
+        assertThat(first.outputsOf("keyedCount")).containsExactly("a#1(A)");
         WorkflowResult second = wf.process(List.of("a"), "keyedCount");
-        assertThat(second.outputs().get("keyedCount")).containsExactly("a#1(A)");
+        assertThat(second.outputsOf("keyedCount")).containsExactly("a#1(A)");
     }
 
     @Test
@@ -69,11 +68,11 @@ class StandaloneWorkflowTest {
                 .build(true);
         wf.process(List.of("a"), "keyedCount");
         WorkflowResult second = wf.process(List.of("a"), "keyedCount");
-        assertThat(second.outputs().get("keyedCount")).containsExactly("a#2(A)");
+        assertThat(second.outputsOf("keyedCount")).containsExactly("a#2(A)");
         // clear state resets continuation
         wf.clearState("keyedCount");
         WorkflowResult third = wf.process(List.of("a"), "keyedCount");
-        assertThat(third.outputs().get("keyedCount")).containsExactly("a#1(A)");
+        assertThat(third.outputsOf("keyedCount")).containsExactly("a#1(A)");
     }
 
     @Test
@@ -124,7 +123,7 @@ class StandaloneWorkflowTest {
         }
 
         WorkflowResult latest = wf.process(List.of("a"), "keyedCount");
-        List<Object> outs = latest.outputs().get("keyedCount");
+        List<Object> outs = latest.outputsOf("keyedCount");
         long expected = (long) threads * runsPerThread + 1;
         String out = (String) outs.get(0);
         assertThat(outs).hasSize(1);
@@ -153,10 +152,9 @@ class StandaloneWorkflowTest {
                     for (int r = 0; r < runsPerThread; r++) {
                         WorkflowResult result = wf.process(List.of("X"), "shout");
                         // TRANSIENT reset happens inside the lock, before unlock
-                        // → no concurrent reset can interfere mid-run
-                        if (!"X".endsWith("A")) {
-                            assertThat(result.sideOutputs()).isEmpty();
-                        }
+                        // → no concurrent reset can interfere mid-run; "X" never ends with "A"
+                        assertThat(result.functionResults().get("shout").outputs()).containsExactly("X");
+                        assertThat(result.functionResults().get("shout").sideOutputs()).isEmpty();
                     }
                 });
             }
@@ -168,6 +166,73 @@ class StandaloneWorkflowTest {
     }
 
     // --------------------------------------------------------------------------------------------
+
+    @Test
+    void aggregatedMetricsSumCountersAcrossFunctions() {
+        StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
+                .registerFunction("a", new TotalCounter())
+                .registerFunction("b", new TotalCounter())
+                .addEdge("a", "b")
+                .activateOutput("b")
+                .build(true);
+        // both functions register "total" and inc per element → sum = 2 per element
+        WorkflowResult result = wf.process(List.of("x", "y"), "a");
+        assertThat(result.aggregatedMetrics()).containsEntry("total", 4L);
+        wf.close();
+    }
+
+    @Test
+    void aggregatedMetricsGaugeLastWins() {
+        StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
+                .registerFunction("a", new GaugeWriter(10))
+                .registerFunction("b", new GaugeWriter(20))
+                .addEdge("a", "b")
+                .activateOutput("b")
+                .build(true);
+        WorkflowResult result = wf.process(List.of("x"), "a");
+        assertThat(result.aggregatedMetrics()).containsEntry("gauge", 20);
+        wf.close();
+    }
+
+    // --------------------------------------------------------------------------------------------
+
+    private static final class TotalCounter extends ProcessFunction<Object, Object> {
+        private Counter counter;
+
+        @Override
+        public void open(OpenContext ctx) {
+            counter = getRuntimeContext().getMetricGroup().counter("total");
+        }
+
+        @Override
+        public void processElement(Object value, Context ctx, Collector<Object> out) {
+            counter.inc();
+            out.collect(value);
+        }
+    }
+
+    private static final class GaugeWriter extends ProcessFunction<Object, Object> {
+        private final int value;
+
+        GaugeWriter(int value) {
+            this.value = value;
+        }
+
+        @Override
+        public void open(OpenContext ctx) {
+            getRuntimeContext().getMetricGroup().gauge("gauge", new org.apache.flink.metrics.Gauge<Integer>() {
+                @Override
+                public Integer getValue() {
+                    return value;
+                }
+            });
+        }
+
+        @Override
+        public void processElement(Object value, Context ctx, Collector<Object> out) {
+            out.collect(value);
+        }
+    }
 
     private static final class UpperCase extends RichMapFunction<String, String> {
         private Counter total;

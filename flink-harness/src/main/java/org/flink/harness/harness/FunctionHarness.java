@@ -127,6 +127,11 @@ public abstract class FunctionHarness {
     /** Raw access to underlying function for lifecycle transitions. */
     public abstract RichFunction unwrap();
 
+    /** Raw access to the runtime context's metric group (for kind-aware aggregation). */
+    public org.apache.flink.metrics.MetricGroup unwrapMetricGroup() {
+        return runtimeContext.getMetricGroup();
+    }
+
     /** true for {@code KeyedProcessFunctionHarness} — must receive keyed edges only. */
     public abstract boolean requiresKeyedEdge();
 

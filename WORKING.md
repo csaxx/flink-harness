@@ -32,6 +32,7 @@ validate the harness approach:
 | 2026-09-02 | Keyed functions as workflow entrypoint require entry KeySelector via registerKeyedFunction overload | Otherwise open() fails loudly at first invocation (discovered by tests) |
 | 2026-09-02 | State descriptor serializers prepared via ExecutionConfig | getDefaultValue() needs initialized serializer (found by tests) |
 | 2026-09-03 | Eager init option: `WorkflowBuilder.initializeAtBuild()` opens all functions at build() time | Fail-fast open() validation, predictable startup; keyed functions get dummy key for state handle registration |
+| 2026-09-03 | WorkflowResult → functionResults + aggregatedMetrics; SideOutputActivation removed | Per-function results only for functions with ≥1 output/side/metrics; aggregatedMetrics sums counters/meters/histograms, gauges last-wins. Side activations → Map<functionId, List<OutputTag>> |
 
 ## Stepwise roadmap
 

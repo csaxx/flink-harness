@@ -31,9 +31,8 @@ StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
 
 WorkflowResult result = wf.process(List.of("line1", "line2"), "parse");
 
-result.outputs()       // Map<functionId, List<output>>
-result.sideOutputs()   // Map<SideOutputKey, List<output>>
-result.metrics()       // Map<functionId, Map<metricName, value>>
+result.functionResults() // Map<functionId, FunctionResult> — only functions with ≥1 output/side/metrics
+result.aggregatedMetrics() // Map<metricName, value> — counters summed, gauges last-wins
 ```
 
 ### Modes

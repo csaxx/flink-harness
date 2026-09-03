@@ -110,18 +110,17 @@ class DemoFunctionsTest {
                 List.of("Alice,book,2,12.50", "Bob,pen,0,2.00", "Alice,notebook,1,8.00"),
                 "parse");
 
-        List<?> accumOut = result.outputs().get("accum");
+        List<?> accumOut = result.outputsOf("accum");
         assertThat((List<Object>) accumOut).containsExactly(
                 "customer=Alice orders=1 total=25.00",
                 "customer=Alice orders=2 total=33.00");
 
-        List<?> reportOut = result.outputs().get("report");
+        List<?> reportOut = result.outputsOf("report");
         assertThat((List<Object>) reportOut).containsExactly(
                 "product=book qty=2 total=25.00",
                 "product=notebook qty=1 total=8.00");
 
-        List<?> rejected = result.sideOutputs().get(
-                new WorkflowResult.SideOutputKey<>("route", DemoFunctions.REJECTED_TAG));
+        List<?> rejected = result.sideOutputsOf("route", DemoFunctions.REJECTED_TAG);
         assertThat((List<Object>) rejected).hasSize(1);
         DemoFunctions.ParsedOrder o = (DemoFunctions.ParsedOrder) ((List<Object>) rejected).get(0);
         assertThat(o.customer()).isEqualTo("Bob");

@@ -6,7 +6,6 @@ import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.util.OutputTag;
 import org.flink.harness.harness.FunctionHarness;
 import org.flink.harness.harness.HarnessFactory;
-import org.flink.harness.internal.SideOutputActivation;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -28,7 +27,7 @@ public final class WorkflowBuilder {
     private final List<Edge> edges = new ArrayList<>();
     private final Map<String, KeySelector<?, ?>> entrySelectors = new LinkedHashMap<>();
     private final Set<String> activatedOutputs = new LinkedHashSet<>();
-    private final Set<SideOutputActivation> activatedSideOutputs = new LinkedHashSet<>();
+    private final Map<String, List<OutputTag<?>>> activatedSideOutputs = new LinkedHashMap<>();
     private boolean eagerInit;
 
     public WorkflowBuilder(Mode mode) {
@@ -150,7 +149,7 @@ public final class WorkflowBuilder {
 
     /** Aggregate a specific side output of this function into the workflow result. */
     public WorkflowBuilder activateSideOutput(String functionId, OutputTag<?> sideOutputTag) {
-        activatedSideOutputs.add(new SideOutputActivation(functionId, sideOutputTag));
+        activatedSideOutputs.computeIfAbsent(functionId, k -> new ArrayList<>()).add(sideOutputTag);
         return this;
     }
 
@@ -213,8 +212,8 @@ public final class WorkflowBuilder {
         for (String id : activatedOutputs) {
             requireHarness(harnesses, id);
         }
-        for (SideOutputActivation s : activatedSideOutputs) {
-            requireHarness(harnesses, s.functionId());
+        for (String id : activatedSideOutputs.keySet()) {
+            requireHarness(harnesses, id);
         }
     }
 
