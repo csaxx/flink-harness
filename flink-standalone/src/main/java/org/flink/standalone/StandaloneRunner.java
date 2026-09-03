@@ -3,7 +3,7 @@ package org.flink.standalone;
 import org.flink.harness.Mode;
 import org.flink.harness.StandaloneWorkflow;
 import org.flink.harness.WorkflowBuilder;
-import org.flink.harness.WorkflowResult;
+import org.flink.harness.result.WorkflowResult;
 import org.flink.test.DemoFunctions;
 
 import java.util.List;

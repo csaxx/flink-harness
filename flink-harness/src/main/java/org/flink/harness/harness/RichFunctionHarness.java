@@ -4,7 +4,7 @@ import org.apache.flink.api.common.functions.RichFunction;
 import org.apache.flink.api.common.functions.RichFilterFunction;
 import org.apache.flink.api.common.functions.RichFlatMapFunction;
 import org.apache.flink.api.common.functions.RichMapFunction;
-import org.flink.harness.FunctionResult;
+import org.flink.harness.result.FunctionResult;
 import org.flink.harness.internal.RecordingCollector;
 
 import java.util.ArrayList;

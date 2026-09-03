@@ -3,7 +3,7 @@ package org.flink.harness.harness;
 import org.apache.flink.streaming.api.TimerService;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.OutputTag;
-import org.flink.harness.FunctionResult;
+import org.flink.harness.result.FunctionResult;
 import org.flink.harness.internal.RecordingCollector;
 
 import java.util.ArrayList;

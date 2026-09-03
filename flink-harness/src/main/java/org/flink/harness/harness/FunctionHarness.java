@@ -3,15 +3,13 @@ package org.flink.harness.harness;
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.functions.RichFunction;
 import org.apache.flink.api.java.functions.KeySelector;
-import org.apache.flink.util.OutputTag;
 import org.flink.harness.Edge;
-import org.flink.harness.FunctionResult;
+import org.flink.harness.result.FunctionResult;
 import org.flink.harness.internal.InMemoryKeyedStateStore;
 import org.flink.harness.internal.StandaloneOperatorMetricGroup;
 import org.flink.harness.internal.StandaloneRuntimeContext;
 import org.flink.harness.WorkflowNode;
 
-import java.util.List;
 import java.util.Map;
 
 /**

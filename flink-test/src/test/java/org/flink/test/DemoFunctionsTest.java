@@ -5,7 +5,7 @@ import org.flink.harness.Edge;
 import org.flink.harness.Mode;
 import org.flink.harness.StandaloneWorkflow;
 import org.flink.harness.WorkflowBuilder;
-import org.flink.harness.WorkflowResult;
+import org.flink.harness.result.WorkflowResult;
 import org.flink.harness.harness.KeyedProcessFunctionHarness;
 import org.flink.harness.harness.ProcessFunctionHarness;
 import org.flink.harness.harness.RichFunctionHarness;

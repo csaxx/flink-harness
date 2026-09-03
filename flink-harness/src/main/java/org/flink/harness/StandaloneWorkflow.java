@@ -9,6 +9,8 @@ import org.apache.flink.metrics.Metric;
 import org.apache.flink.util.OutputTag;
 import org.flink.harness.harness.FunctionHarness;
 import org.flink.harness.internal.StandaloneMetricGroup;
+import org.flink.harness.result.FunctionResult;
+import org.flink.harness.result.WorkflowResult;
 
 import java.util.ArrayDeque;
 import java.util.Deque;
