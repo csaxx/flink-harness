@@ -22,15 +22,11 @@ public final class ProcessFunctionHarness extends FunctionHarness {
     private final List<Object> mainOutputs = new ArrayList<>();
     private final RecordingCollector<Object> mainCollector = new RecordingCollector<>(mainOutputs);
     private final Map<OutputTag<?>, List<Object>> sideOutputs = new LinkedHashMap<>();
-    private final String inputType;
-    private final String outputType;
 
     @SuppressWarnings("unchecked")
-    public ProcessFunctionHarness(String id, ProcessFunction<?, ?> function, String inputType, String outputType) {
+    public ProcessFunctionHarness(String id, ProcessFunction<?, ?> function) {
         super(id);
         this.function = (ProcessFunction<Object, Object>) function;
-        this.inputType = inputType;
-        this.outputType = outputType;
         this.context = this.function.new Context() {
             @Override
             public Long timestamp() {
@@ -71,15 +67,5 @@ public final class ProcessFunctionHarness extends FunctionHarness {
     @Override
     public boolean requiresKeyedEdge() {
         return false;
-    }
-
-    @Override
-    public String inputTypeName() {
-        return inputType;
-    }
-
-    @Override
-    public String outputTypeName() {
-        return outputType;
     }
 }

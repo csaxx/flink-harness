@@ -16,22 +16,17 @@ import java.util.List;
  */
 public final class RichFunctionHarness extends FunctionHarness {
 
-    /** Supported rich function kinds. */
     public enum Kind { MAP, FLATMAP, FILTER }
 
     private final RichFunction function;
     private final Kind kind;
     private final List<Object> outputs = new ArrayList<>();
     private final RecordingCollector<Object> collector = new RecordingCollector<>(outputs);
-    private final String inputType;
-    private final String outputType;
 
-    public RichFunctionHarness(String id, RichFunction function, Kind kind, String inputType, String outputType) {
+    public RichFunctionHarness(String id, RichFunction function, Kind kind) {
         super(id);
         this.function = function;
         this.kind = kind;
-        this.inputType = inputType;
-        this.outputType = outputType;
     }
 
     @Override
@@ -67,15 +62,5 @@ public final class RichFunctionHarness extends FunctionHarness {
     @Override
     public boolean requiresKeyedEdge() {
         return false;
-    }
-
-    @Override
-    public String inputTypeName() {
-        return inputType;
-    }
-
-    @Override
-    public String outputTypeName() {
-        return outputType;
     }
 }

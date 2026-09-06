@@ -10,22 +10,21 @@ import org.apache.flink.streaming.api.functions.ProcessFunction;
 /** Factory into the right harness subtype per function class. Public for cross-package access from {@code WorkflowBuilder}; not part of the consumer API. */
 public final class HarnessFactory {
 
-    /** Create the appropriate harness for the given function instance. */
-    public static FunctionHarness create(String id, Object function, String inputType, String outputType) {
+    public static FunctionHarness create(String id, Object function) {
         if (function instanceof ProcessFunction<?, ?> p) {
-            return new ProcessFunctionHarness(id, p, inputType, outputType);
+            return new ProcessFunctionHarness(id, p);
         }
         if (function instanceof KeyedProcessFunction<?, ?, ?> k) {
-            return new KeyedProcessFunctionHarness(id, k, inputType, outputType);
+            return new KeyedProcessFunctionHarness(id, k);
         }
         if (function instanceof RichMapFunction<?, ?> m) {
-            return new RichFunctionHarness(id, m, RichFunctionHarness.Kind.MAP, inputType, outputType);
+            return new RichFunctionHarness(id, m, RichFunctionHarness.Kind.MAP);
         }
         if (function instanceof RichFlatMapFunction<?, ?> f) {
-            return new RichFunctionHarness(id, f, RichFunctionHarness.Kind.FLATMAP, inputType, outputType);
+            return new RichFunctionHarness(id, f, RichFunctionHarness.Kind.FLATMAP);
         }
         if (function instanceof RichFilterFunction<?> f) {
-            return new RichFunctionHarness(id, f, RichFunctionHarness.Kind.FILTER, inputType, outputType);
+            return new RichFunctionHarness(id, f, RichFunctionHarness.Kind.FILTER);
         }
         if (function instanceof RichFunction) {
             throw new IllegalArgumentException(

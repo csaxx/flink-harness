@@ -19,7 +19,7 @@ class KeyedProcessFunctionHarnessTest {
     @Test
     void statePerKeyAndCurrentKeyExposure() {
         CountingKeyFn fn = new CountingKeyFn();
-        KeyedProcessFunctionHarness harness = new KeyedProcessFunctionHarness("count", fn, "String", "String");
+        KeyedProcessFunctionHarness harness = new KeyedProcessFunctionHarness("count", fn);
         KeySelector<String, String> selector = new KeySelector<String, String>() {
             @Override
             public String getKey(String value) {
@@ -33,17 +33,16 @@ class KeyedProcessFunctionHarnessTest {
         FunctionResult<?> r3 = harness.processViaEdge("banana", edge);
         FunctionResult<?> r4 = harness.processViaEdge("apple", edge);
 
-        assertThat((List<Object>) r1.outputs()).containsExactly("apple→key=a→count=1");
-        assertThat((List<Object>) r2.outputs()).containsExactly("apricot→key=a→count=2");
-        assertThat((List<Object>) r3.outputs()).containsExactly("banana→key=b→count=1");
-        assertThat((List<Object>) r4.outputs()).containsExactly("apple→key=a→count=3");
+        assertThat((List<Object>) r1.outputs()).containsExactly("apple\u2192key=a\u2192count=1");
+        assertThat((List<Object>) r2.outputs()).containsExactly("apricot\u2192key=a\u2192count=2");
+        assertThat((List<Object>) r3.outputs()).containsExactly("banana\u2192key=b\u2192count=1");
+        assertThat((List<Object>) r4.outputs()).containsExactly("apple\u2192key=a\u2192count=3");
     }
 
     @Test
     void unkeyedEdgeFailsLoudlyAtRuntime() {
         CountingKeyFn fn = new CountingKeyFn();
-        KeyedProcessFunctionHarness harness = new KeyedProcessFunctionHarness("count", fn, "String", "String");
-        // no key bound → state access must fail with a clear message
+        KeyedProcessFunctionHarness harness = new KeyedProcessFunctionHarness("count", fn);
         try {
             harness.processViaEdge("apple", null);
         } catch (RuntimeException e) {
@@ -65,7 +64,7 @@ class KeyedProcessFunctionHarnessTest {
         public void processElement(String value, Context ctx, Collector<String> out) throws Exception {
             long current = count.value() == null ? 0 : count.value();
             count.update(current + 1);
-            out.collect(value + "→key=" + ctx.getCurrentKey() + "→count=" + (current + 1));
+            out.collect(value + "\u2192key=" + ctx.getCurrentKey() + "\u2192count=" + (current + 1));
         }
     }
 }

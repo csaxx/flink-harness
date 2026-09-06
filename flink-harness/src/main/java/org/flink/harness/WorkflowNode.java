@@ -8,9 +8,16 @@ import java.util.List;
  */
 public record WorkflowNode(
         String functionId,
+        Kind kind,
         String inputType,
         String outputType,
         List<String> successors) implements Serializable {
+
+    public enum Kind {
+        SOURCE,
+        FUNCTION,
+        SINK
+    }
 
     public static final String UNKNOWN_TYPE = "<unknown>";
 }

@@ -1,13 +1,11 @@
 package org.flink.harness;
 
-import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
 import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.Meter;
 import org.apache.flink.metrics.Metric;
-import org.apache.flink.util.OutputTag;
-import org.flink.harness.harness.FunctionHarness;
+import org.flink.harness.harness.NodeHarness;
 import org.flink.harness.internal.StandaloneMetricGroup;
 import org.flink.harness.result.FunctionResult;
 import org.flink.harness.result.WorkflowResult;
@@ -22,7 +20,8 @@ import java.util.concurrent.locks.ReentrantLock;
 
 /**
  * Executable workflow graph built by {@link WorkflowBuilder}.
- * {@code process(inputs, entryId)} runs elements through the graph; see AGENTS.md for semantics.
+ * {@code process(inputs, sourceId)} runs elements through the graph starting at a source node.
+ * See AGENTS.md for semantics.
  *
  * <p>Thread-safe by design: the entire {@link #process} call (and all clear/close operations)
  * is guarded by a single lock. Concurrent {@code process} invocations serialize on the same
@@ -31,29 +30,26 @@ import java.util.concurrent.locks.ReentrantLock;
 public final class StandaloneWorkflow {
 
     private final ReentrantLock lock = new ReentrantLock();
-    private final Map<String, FunctionHarness> harnesses;
+    private final Map<String, NodeHarness> nodes;
     private final List<Edge> edges;
-    private final Map<String, KeySelector<?, ?>> entrySelectors;
     private final Map<String, List<Edge>> outboundEdges;
-    private final Set<String> activatedOutputs;
-    private final Map<String, List<OutputTag<?>>> activatedSideOutputs;
+    private final Set<String> sourceIds;
+    private final Set<String> sinkIds;
     private final Mode mode;
     private final List<WorkflowNode> graph;
     private boolean closed;
 
-    StandaloneWorkflow(Map<String, FunctionHarness> harnesses, List<Edge> edges,
-            Map<String, KeySelector<?, ?>> entrySelectors,
-            Set<String> activatedOutputs, Map<String, List<OutputTag<?>>> activatedSideOutputs,
+    StandaloneWorkflow(Map<String, NodeHarness> nodes, List<Edge> edges,
+            Set<String> sourceIds, Set<String> sinkIds,
             Mode mode, List<WorkflowNode> graph) {
-        this.harnesses = harnesses;
+        this.nodes = nodes;
         this.edges = edges;
-        this.entrySelectors = entrySelectors;
+        this.sourceIds = sourceIds;
+        this.sinkIds = sinkIds;
         this.outboundEdges = new LinkedHashMap<>();
         for (Edge edge : edges) {
             outboundEdges.computeIfAbsent(edge.src(), k -> new java.util.ArrayList<>()).add(edge);
         }
-        this.activatedOutputs = activatedOutputs;
-        this.activatedSideOutputs = activatedSideOutputs;
         this.mode = mode;
         this.graph = graph;
     }
@@ -62,12 +58,12 @@ public final class StandaloneWorkflow {
     // execute
     // --------------------------------------------------------------------------------------------
 
-    /** Feed all elements through the graph starting at {@code entryFunctionId}.
+    /** Feed all elements through the graph starting at {@code sourceId}.
      * Guarded by the workflow lock; in TRANSIENT mode the reset also happens within the lock. */
-    public WorkflowResult process(List<?> inputs, String entryFunctionId) {
+    public WorkflowResult process(List<?> inputs, String sourceId) {
         lock.lock();
         try {
-            return doProcess(inputs, entryFunctionId);
+            return doProcess(inputs, sourceId);
         } finally {
             if (mode == Mode.TRANSIENT) {
                 resetTransient();
@@ -76,70 +72,64 @@ public final class StandaloneWorkflow {
         }
     }
 
-    private WorkflowResult doProcess(List<?> inputs, String entryFunctionId) {
-        FunctionHarness entryHarness = harnesses.get(entryFunctionId);
-        if (entryHarness == null) {
-            throw new IllegalStateException("unknown function id: " + entryFunctionId);
-        }
-        Edge entryEdge = null;
-        if (entryHarness.requiresKeyedEdge()) {
-            KeySelector<?, ?> selector = entrySelectors.get(entryFunctionId);
-            if (selector == null) {
-                throw new IllegalStateException(
-                        "KeyedProcessFunction " + entryFunctionId
-                                + " used as workflow entrypoint but no entry key selector was registered — "
-                                + "use registerKeyedFunction(id, fn, keySelector)");
-            }
-            entryEdge = new Edge(null, entryFunctionId, selector);
+    private WorkflowResult doProcess(List<?> inputs, String sourceId) {
+        if (!sourceIds.contains(sourceId)) {
+            throw new IllegalArgumentException("unknown source id: " + sourceId
+                    + "; registered sources: " + sourceIds);
         }
 
         Deque<Invocation> queue = new ArrayDeque<>();
         for (Object input : inputs) {
-            queue.add(new Invocation(entryFunctionId, input, entryEdge));
+            queue.add(new Invocation(sourceId, input, null));
         }
 
-        // per-function accumulation
         Map<String, List<Object>> outputsAgg = new LinkedHashMap<>();
-        Map<String, Map<OutputTag<?>, List<Object>>> sideAgg = new LinkedHashMap<>();
 
         while (!queue.isEmpty()) {
             Invocation inv = queue.poll();
-            FunctionHarness harness = harnesses.get(inv.functionId());
-            if (harness == null) {
-                throw new IllegalStateException("unknown function id: " + inv.functionId());
+            NodeHarness node = nodes.get(inv.functionId());
+            if (node == null) {
+                throw new IllegalStateException("unknown node id: " + inv.functionId());
             }
 
-            FunctionResult<?> result = harness.processViaEdge(inv.element(), inv.inboundEdge());
+            FunctionResult<?> result = node.processViaEdge(inv.element(), inv.inboundEdge());
 
-            if (activatedOutputs.contains(inv.functionId())) {
+            // sinks collect outputs unconditionally
+            if (sinkIds.contains(inv.functionId())) {
                 outputsAgg.computeIfAbsent(inv.functionId(), k -> new java.util.ArrayList<>())
                         .addAll(result.outputs());
             }
-            aggregateSideOutputs(inv.functionId(), result, sideAgg);
 
             List<Edge> outbound = outboundEdges.getOrDefault(inv.functionId(), List.of());
             for (Edge edge : outbound) {
-                for (Object out : result.outputs()) {
+                List<?> transported;
+                if (edge.sideChannel()) {
+                    transported = result.sideOutputs().get(edge.sideTag());
+                    if (transported == null) {
+                        continue; // no elements for this side output
+                    }
+                } else {
+                    transported = result.outputs();
+                }
+                for (Object out : transported) {
                     queue.add(new Invocation(edge.dst(), out, edge));
                 }
             }
         }
 
-        // assemble per-function results (only functions with ≥1 of outputs/sideOutputs/metrics)
+        // per-function results (only functions with >=1 of outputs/sideOutputs/metrics)
         Map<String, FunctionResult<Object>> results = new LinkedHashMap<>();
-        for (Map.Entry<String, FunctionHarness> entry : harnesses.entrySet()) {
+        for (Map.Entry<String, NodeHarness> entry : nodes.entrySet()) {
             String id = entry.getKey();
             List<Object> outs = List.copyOf(outputsAgg.getOrDefault(id, List.of()));
-            Map<OutputTag<?>, List<Object>> sides = sideAgg.getOrDefault(id, Map.of());
             Map<String, Object> metricSnap = entry.getValue().metricsSnapshot();
 
             boolean hasOutputs = !outs.isEmpty();
-            boolean hasSides = !sides.isEmpty();
             boolean hasMetrics = !metricSnap.isEmpty();
-            if (hasOutputs || hasSides || hasMetrics) {
-                @SuppressWarnings("unchecked")
-                Map<OutputTag<?>, List<?>> sidesCasted = (Map<OutputTag<?>, List<?>>) (Map<?, ?>) sides;
-                results.put(id, new FunctionResult<>(outs, sidesCasted, metricSnap));
+            // side outputs of non-sink nodes are routed via edges, not collected directly;
+            // they still show up if the node happened to be a sink with side-channel edges
+            if (hasOutputs || hasMetrics) {
+                results.put(id, new FunctionResult<>(outs, Map.of(), metricSnap));
             }
         }
 
@@ -147,32 +137,15 @@ public final class StandaloneWorkflow {
         return new WorkflowResult(results, aggregated);
     }
 
-    @SuppressWarnings("unchecked")
-    private void aggregateSideOutputs(String functionId, FunctionResult<?> result,
-            Map<String, Map<OutputTag<?>, List<Object>>> sideAgg) {
-        List<OutputTag<?>> tags = activatedSideOutputs.get(functionId);
-        if (tags == null) {
-            return;
-        }
-        for (OutputTag<?> tag : tags) {
-            List<?> values = result.sideOutputs().get(tag);
-            if (values != null && !values.isEmpty()) {
-                sideAgg.computeIfAbsent(functionId, k -> new LinkedHashMap<>())
-                        .computeIfAbsent(tag, k -> new java.util.ArrayList<>())
-                        .addAll((List<Object>) values);
-            }
-        }
-    }
-
-    /** Aggregate metrics across all harnesses: counters/meters/histograms summed, gauges last-wins. */
+    /** Aggregate metrics across all nodes: counters/meters/histograms summed, gauges last-wins. */
     private Map<String, Object> aggregateAllMetrics() {
         Map<String, Object> aggregated = new LinkedHashMap<>();
-        for (FunctionHarness harness : harnesses.values()) {
-            for (Map.Entry<String, Metric> entry : metricInstances(harness).entrySet()) {
+        for (NodeHarness node : nodes.values()) {
+            for (Map.Entry<String, Metric> entry : metricInstances(node).entrySet()) {
                 String name = entry.getKey();
                 Metric metric = entry.getValue();
                 if (metric instanceof Gauge<?> gauge) {
-                    aggregated.put(name, gauge.getValue()); // last-wins; registration order is deterministic
+                    aggregated.put(name, gauge.getValue());
                 } else if (metric instanceof Counter counter) {
                     aggregated.merge(name, counter.getCount(), (a, b) -> ((Number) a).longValue() + ((Number) b).longValue());
                 } else if (metric instanceof Meter meter) {
@@ -185,13 +158,13 @@ public final class StandaloneWorkflow {
         return aggregated;
     }
 
-    private Map<String, Metric> metricInstances(FunctionHarness harness) {
-        return ((StandaloneMetricGroup) harness.unwrapMetricGroup()).metricInstances();
+    private Map<String, Metric> metricInstances(NodeHarness node) {
+        return ((StandaloneMetricGroup) node.unwrapMetricGroup()).metricInstances();
     }
 
     private void resetTransient() {
-        for (FunctionHarness harness : harnesses.values()) {
-            harness.resetAll();
+        for (NodeHarness node : nodes.values()) {
+            node.resetAll();
         }
     }
 
@@ -199,19 +172,26 @@ public final class StandaloneWorkflow {
     // introspection
     // --------------------------------------------------------------------------------------------
 
-    public Set<String> getFunctionIds() {
-        return harnesses.keySet();
+    public Set<String> getNodeIds() {
+        return nodes.keySet();
     }
 
-    public Object getFunction(String id) {
-        FunctionHarness h = harnesses.get(id);
-        if (h == null) {
-            throw new IllegalStateException("unknown function id: " + id);
+    public Set<String> getSourceIds() {
+        return sourceIds;
+    }
+
+    public Set<String> getSinkIds() {
+        return sinkIds;
+    }
+
+    public Object getNode(String id) {
+        NodeHarness n = nodes.get(id);
+        if (n == null) {
+            throw new IllegalStateException("unknown node id: " + id);
         }
-        return h.unwrap();
+        return n.unwrap();
     }
 
-    /** DAG for visualization — immutable copy of the graph. */
     public List<WorkflowNode> getWorkflow() {
         return List.copyOf(graph);
     }
@@ -220,10 +200,10 @@ public final class StandaloneWorkflow {
     // global state / metrics management
     // --------------------------------------------------------------------------------------------
 
-    public void clearState(String functionId) {
+    public void clearState(String nodeId) {
         lock.lock();
         try {
-            require(functionId).clearState();
+            require(nodeId).clearState();
         } finally {
             lock.unlock();
         }
@@ -232,16 +212,16 @@ public final class StandaloneWorkflow {
     public void clearStateAll() {
         lock.lock();
         try {
-            harnesses.values().forEach(FunctionHarness::clearState);
+            nodes.values().forEach(NodeHarness::clearState);
         } finally {
             lock.unlock();
         }
     }
 
-    public void clearMetrics(String functionId) {
+    public void clearMetrics(String nodeId) {
         lock.lock();
         try {
-            require(functionId).clearMetrics();
+            require(nodeId).clearMetrics();
         } finally {
             lock.unlock();
         }
@@ -250,18 +230,18 @@ public final class StandaloneWorkflow {
     public void clearMetricsAll() {
         lock.lock();
         try {
-            harnesses.values().forEach(FunctionHarness::clearMetrics);
+            nodes.values().forEach(NodeHarness::clearMetrics);
         } finally {
             lock.unlock();
         }
     }
 
-    private FunctionHarness require(String id) {
-        FunctionHarness h = harnesses.get(id);
-        if (h == null) {
-            throw new IllegalStateException("unknown function id: " + id);
+    private NodeHarness require(String id) {
+        NodeHarness n = nodes.get(id);
+        if (n == null) {
+            throw new IllegalStateException("unknown node id: " + id);
         }
-        return h;
+        return n;
     }
 
     // --------------------------------------------------------------------------------------------
@@ -273,7 +253,7 @@ public final class StandaloneWorkflow {
         try {
             if (!closed) {
                 closed = true;
-                harnesses.values().forEach(FunctionHarness::close);
+                nodes.values().forEach(NodeHarness::close);
             }
         } finally {
             lock.unlock();

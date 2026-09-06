@@ -21,7 +21,7 @@ class ProcessFunctionHarnessTest {
     @SuppressWarnings("unchecked")
     void invokesAndCollectsOutputsAndSideOutputs() {
         RoutingFunction fn = new RoutingFunction();
-        ProcessFunctionHarness harness = new ProcessFunctionHarness("route", fn, "String", "String");
+        ProcessFunctionHarness harness = new ProcessFunctionHarness("route", fn);
 
         FunctionResult<?> result = harness.processViaEdge("hello", null);
         assertThat((List<Object>) result.outputs()).containsExactly("HELLO");
@@ -35,7 +35,7 @@ class ProcessFunctionHarnessTest {
     @Test
     void metricsSnapshotUpdateAfterInvocation() {
         MetaFunction fn = new MetaFunction();
-        ProcessFunctionHarness harness = new ProcessFunctionHarness("meta", fn, "Object", "Object");
+        ProcessFunctionHarness harness = new ProcessFunctionHarness("meta", fn);
         harness.processViaEdge("x", null);
         harness.processViaEdge("y", null);
         assertThat(harness.metricsSnapshot()).containsEntry("total", 2L);
@@ -44,7 +44,7 @@ class ProcessFunctionHarnessTest {
     @Test
     void resetClearsMetricsAndState() {
         MetaFunction fn = new MetaFunction();
-        ProcessFunctionHarness harness = new ProcessFunctionHarness("meta", fn, "Object", "Object");
+        ProcessFunctionHarness harness = new ProcessFunctionHarness("meta", fn);
         harness.processViaEdge("x", null);
         harness.resetAll();
         assertThat(harness.metricsSnapshot()).containsEntry("total", 0L);
