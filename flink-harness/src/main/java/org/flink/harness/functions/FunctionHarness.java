@@ -1,4 +1,4 @@
-package org.flink.harness.harness;
+package org.flink.harness.functions;
 
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.functions.RichFunction;
@@ -6,8 +6,8 @@ import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.metrics.MetricGroup;
 import org.flink.harness.Edge;
 import org.flink.harness.result.FunctionResult;
-import org.flink.harness.internal.InMemoryKeyedStateStore;
-import org.flink.harness.internal.StandaloneOperatorMetricGroup;
+import org.flink.harness.state.InMemoryKeyedStateStore;
+import org.flink.harness.metrics.StandaloneOperatorMetricGroup;
 import org.flink.harness.internal.StandaloneRuntimeContext;
 
 import java.util.Map;
@@ -95,6 +95,15 @@ public abstract class FunctionHarness implements NodeHarness {
 
     protected final Object currentKey() {
         return currentKey;
+    }
+
+    protected final void setCurrentKey(Object key) {
+        this.currentKey = key;
+        stateStore.setCurrentKey(key);
+    }
+
+    protected final InMemoryKeyedStateStore stateStore() {
+        return stateStore;
     }
 
     @Override

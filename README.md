@@ -178,7 +178,7 @@ wf.close();  // calls close() on all nodes (idempotent, guarded by lock)
 | Package | Audience |
 |---------|----------|
 | `org.flink.harness` | Consumer API — `WorkflowBuilder`, `StandaloneWorkflow`, `WorkflowResult`, `WorkflowNode`, `Mode`, `Edge` |
-| `org.flink.harness.harness` | Nodes — `NodeHarness` (interface), `FunctionHarness` + subtypes, `HarnessFactory` |
+| `org.flink.harness.functions` | Nodes — `NodeHarness` (interface), `FunctionHarness` + subtypes, `HarnessFactory` |
 | `org.flink.harness.source` | `StandaloneSource` — subclassable source base class |
 | `org.flink.harness.sink` | `StandaloneSink` — subclassable sink base class |
 | `org.flink.harness.result` | `FunctionResult`, `WorkflowResult` — output containers |

@@ -1,4 +1,4 @@
-package org.flink.harness.harness;
+package org.flink.harness.functions;
 
 import org.apache.flink.api.common.functions.RichFilterFunction;
 import org.apache.flink.api.common.functions.RichFlatMapFunction;
@@ -6,16 +6,23 @@ import org.apache.flink.api.common.functions.RichFunction;
 import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
+import org.apache.flink.util.clock.Clock;
+import org.apache.flink.util.clock.SystemClock;
+import org.flink.harness.Mode;
 
-/** Factory into the right harness subtype per function class. Public for cross-package access from {@code WorkflowBuilder}; not part of the consumer API. */
 public final class HarnessFactory {
 
     public static FunctionHarness create(String id, Object function) {
+        return create(id, function, SystemClock.getInstance(), Mode.CONTINUOUS);
+    }
+
+    public static FunctionHarness create(String id, Object function, Clock clock, Mode mode) {
         if (function instanceof ProcessFunction<?, ?> p) {
             return new ProcessFunctionHarness(id, p);
         }
         if (function instanceof KeyedProcessFunction<?, ?, ?> k) {
-            return new KeyedProcessFunctionHarness(id, k);
+            boolean allowTimers = mode == Mode.CONTINUOUS;
+            return new KeyedProcessFunctionHarness(id, k, clock, allowTimers);
         }
         if (function instanceof RichMapFunction<?, ?> m) {
             return new RichFunctionHarness(id, m, RichFunctionHarness.Kind.MAP);

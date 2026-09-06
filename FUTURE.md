@@ -4,12 +4,12 @@ Scope: common, often-used Flink features that can be integrated into standalone
 execution **without bloating the implementation**. Each entry: motivation, API
 sketch, implementation notes, estimated cost, test plan.
 
-## Global design directive (2026-09-03)
+## Global design directive (2026-09-03, updated 2026-09-07)
 
 | Mode | Semantics for all future features |
 |---|---|
-| CONTINUOUS | Replicate a real, running Flink job. Assume an external tool loads the workflow and feeds data continuously. Processing time = wall clock. Watermarks advance as data flows. Timers/state/metrics persist across `process()` calls. |
-| TRANSIENT | One-shot batch semantics. **No timer support** — `timerService()` registration methods throw `UnsupportedOperationException`. Time queries (`currentProcessingTime`, `currentWatermark`, `timestamp`) still return sane values. Everything reset after each `process()` (unchanged). |
+| CONTINUOUS | Replicate a real, running Flink job. Processing time = wall clock (or pluggable Clock). Processing-time timers supported via three modes (OPPORTUNISTIC / MANUAL / BACKGROUND). Watermarks advance as data flows (future work). State/metrics persist across `process()` calls. |
+| TRANSIENT | One-shot batch semantics. No timer support — `register*` / `delete*` throw `UnsupportedOperationException`. Time queries (`currentProcessingTime`, `currentWatermark`, `timestamp`) still return sane values. Everything reset after each `process()` (unchanged). |
 
 All features below must respect the existing constraints: thread-safe via the
 single workflow lock, raw casts confined to boundary helpers, fail loudly at
@@ -17,68 +17,27 @@ single workflow lock, raw casts confined to boundary helpers, fail loudly at
 
 ---
 
-## 1. Timers + time (keyed) — headline feature
+## 1. Processing-time timers — IMPLEMENTED (2026-09-07)
 
-**Motivation.** The most common gap: real-world `KeyedProcessFunction`s use
-timers for session timeouts, buffering windows, dedup TTLs, rate limiting.
-Flink itself restricts timers to keyed streams
-(`TimerService.UNSUPPORTED_REGISTER_TIMER_MSG`), so keyed-only support is
-faithful to Flink, not a compromise.
+Processing-time timers (keyed only) are fully implemented in `org.flink.harness.timer`.
+See AGENTS.md for the API surface and `KeyedTimerIntegrationTest.java` for coverage.
+Three modes: OPPORTUNISTIC (firing after each element / end of process()), MANUAL
+(firing only via `fireProcessingTimers()`), BACKGROUND (daemon thread, ~100ms poll,
+results/errors via `BackgroundTimerListener`).
 
-**API surface.**
-- `process()` inputs gain optional timestamps:
-  `processTimestamped(List<TimestampedValue<T>> inputs, String sourceId)` with
-  `TimestampedValue<T>(T value, long timestamp)`; plain `process()` = no
-  timestamps (`ctx.timestamp()` → null, unchanged behavior).
-- Watermark advancement on `StandaloneWorkflow` (CONTINUOUS only):
-  - `advanceWatermark(long wm)` — fires all due event-time timers across all
-    keyed functions, in timestamp order, routing their outputs into the graph.
-  - Default watermark = max-seen element timestamp (auto-advance after each
-    element), matching `IngestionTimeWatermarkStrategy`-ish simplicity; explicit
-    `advanceWatermark` overrides for late-data testing.
-- Processing time = wall clock (`System.currentTimeMillis()`). Due
-  processing-time timers are fired:
-  - after each element invocation (cheap check: `while (heap.peek() <= now)`),
-  - at the end of every `process()` call,
-  - so an external feeder that calls `process()` repeatedly sees timers fire
-    between batches exactly like a live job that is idle between records.
-  - No background firing thread: firing only happens inside the workflow lock
-    during `process()`/`advance*()` calls. Documented as a deliberate
-    standalone semantic (a job with no input is quiescent; firing is
-    observable at the next interaction).
+### Remaining future work within this section
 
-**Implementation.**
-- `internal/StandaloneTimerService` — implements the 6 `TimerService` methods.
-  Timer heap per keyed harness: `PriorityQueue<(timestamp, key, TimeDomain)>`,
-  dedup on (key, timestamp, domain) — Flink registers one timer per key+ts;
-  `delete*Timer` removes. `currentProcessingTime()` = wall clock,
-  `currentWatermark()` = workflow watermark.
-- `KeyedProcessFunctionHarness`: instantiate `OnTimerContext` via the same
-  non-static-inner-class-through-function-instance pattern already used for
-  `Context`; add `onTimer(timestamp, TimeDomain)` entry point that binds the
-  timer's key (reuse `stateStore.setCurrentKey`) before invoking
-  `function.onTimer(...)`, collects main + side outputs into a
-  `FunctionResult` exactly like `processElement`.
-- `StandaloneWorkflow.doProcess`: the BFS loop gains a timer-firing step —
-  after draining (or interleaved before polling the next element when a timer
-  is due earlier than the queued elements' timestamps in event time), pop due
-  timers, invoke `onTimer`, enqueue their outputs. Queue entries carry
-  timestamps so event-time ordering stays deterministic.
-- Timer registrations live in harness state → cleared by `resetAll()` /
-  `clearState()` in CONTINUOUS management APIs; in TRANSIENT the
-  `TimerService` register/delete methods throw UOE (query methods still work).
-
-**Cost.** ~350 lines incl. tests. **Touches:** new `StandaloneTimerService`,
-`TimestampedValue`, `KeyedProcessFunctionHarness`, `StandaloneWorkflow`,
-`WorkflowBuilder` (mode validation), AGENTS.md scope table.
-
-**Tests.** processing-time timer fires after element; event-time timer fires
-on `advanceWatermark`; dedup (same key+ts registered twice fires once);
-delete; onTimer output routes downstream; timer side outputs; key isolation
-(two keys, same timestamp); TRANSIENT → UOE on register; CONTINUOUS → timer
-survives across `process()` calls and fires in a later call. Note: entry point
-parameter changed from `functionId` to `sourceId` in v1 (2026-09-03); the
-timer feature uses `sourceId` consistently.
+1. **Event-time timers + watermarks**: `advanceWatermark(long wm)`, auto-advance
+   from element timestamps, `TimestampedValue` input, `registerEventTimeTimer` /
+   `deleteEventTimeTimer` + `advanceWatermark` triggering firings.
+2. **`processTimestamped(List<TimestampedValue<T>>, sourceId)`**: timestamped
+   input API so `ctx.timestamp()` returns element timestamps.
+3. **`ctx.timestamp()` in processElement**: currently returns null; with
+   timestamped input support it would return the element's timestamp.
+4. **Deterministic timer tests with ManualClock**: OPPORTUNISTIC / MANUAL modes
+   already use builder.clock(Clock). BACKGROUND mode with ManualClock is limited
+   by real wall-clock polling (~100ms resolution). Low priority — BACKGROUND
+   with SystemClock works for integration tests.
 
 ---
 
@@ -205,10 +164,11 @@ documented.
 
 ## Suggested sequencing
 
-1. §1 timers + time (unlocks the most real-world functions)
-2. §2 CoProcessFunction, §3 broadcast (topology coverage)
-3. §4 sink + §5 fillers (completeness polish)
-4. §6 CheckpointedFunction (only on demand)
+1. [IMPLEMENTED] §1 processing-time timers
+2. §1 event-time / watermarks / processTimestamped (remaining future work)
+3. §2 CoProcessFunction, §3 broadcast (topology coverage)
+4. §4 sink + §5 fillers (completeness polish)
+5. §6 CheckpointedFunction (only on demand)
 
 Each step: update AGENTS.md scope table + WORKING.md decision log, add tests,
 `mvn -q verify`.

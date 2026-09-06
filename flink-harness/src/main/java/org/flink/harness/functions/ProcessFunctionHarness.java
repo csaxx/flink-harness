@@ -1,4 +1,4 @@
-package org.flink.harness.harness;
+package org.flink.harness.functions;
 
 import org.apache.flink.streaming.api.TimerService;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
@@ -13,7 +13,10 @@ import java.util.Map;
 
 /**
  * Harness wrapping a non-keyed {@link ProcessFunction}. Context instantiated through the
- * function instance (permitted by Flink's inner-class pattern). Timers unsupported in v1.
+ * function instance (permitted by Flink's inner-class pattern). {@link TimerService}
+ * returned by {@code ctx.timerService()} is query-only: {@code currentProcessingTime()}
+ * and {@code currentWatermark()} work; register/delete throw UnsupportedOperationException
+ * (matching Flink's non-keyed {@code ProcessOperator} behavior).
  */
 public final class ProcessFunctionHarness extends FunctionHarness {
 
@@ -27,6 +30,37 @@ public final class ProcessFunctionHarness extends FunctionHarness {
     public ProcessFunctionHarness(String id, ProcessFunction<?, ?> function) {
         super(id);
         this.function = (ProcessFunction<Object, Object>) function;
+        final TimerService queryOnly = new TimerService() {
+            @Override
+            public long currentProcessingTime() {
+                return System.currentTimeMillis();
+            }
+
+            @Override
+            public long currentWatermark() {
+                return Long.MIN_VALUE;
+            }
+
+            @Override
+            public void registerProcessingTimeTimer(long time) {
+                throw new UnsupportedOperationException(UNSUPPORTED_REGISTER_TIMER_MSG);
+            }
+
+            @Override
+            public void registerEventTimeTimer(long time) {
+                throw new UnsupportedOperationException(UNSUPPORTED_REGISTER_TIMER_MSG);
+            }
+
+            @Override
+            public void deleteProcessingTimeTimer(long time) {
+                throw new UnsupportedOperationException(UNSUPPORTED_DELETE_TIMER_MSG);
+            }
+
+            @Override
+            public void deleteEventTimeTimer(long time) {
+                throw new UnsupportedOperationException(UNSUPPORTED_DELETE_TIMER_MSG);
+            }
+        };
         this.context = this.function.new Context() {
             @Override
             public Long timestamp() {
@@ -35,7 +69,7 @@ public final class ProcessFunctionHarness extends FunctionHarness {
 
             @Override
             public TimerService timerService() {
-                throw new UnsupportedOperationException("timers are not supported in flink-harness v1");
+                return queryOnly;
             }
 
             @Override

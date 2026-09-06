@@ -4,19 +4,23 @@ import org.apache.flink.api.common.functions.Function;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.util.OutputTag;
-import org.flink.harness.harness.FunctionHarness;
-import org.flink.harness.harness.HarnessFactory;
-import org.flink.harness.harness.NodeHarness;
+import org.apache.flink.util.clock.Clock;
+import org.apache.flink.util.clock.SystemClock;
+import org.flink.harness.functions.HarnessFactory;
+import org.flink.harness.functions.KeyedProcessFunctionHarness;
+import org.flink.harness.functions.NodeHarness;
 import org.flink.harness.source.StandaloneSource;
 import org.flink.harness.sink.StandaloneSink;
 import org.flink.harness.WorkflowNode.Kind;
+import org.flink.harness.timer.BackgroundTimerListener;
+import org.flink.harness.timer.ProcessingTimerMode;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * Fluent builder for {@link StandaloneWorkflow}. Sources are the only entrypoints;
@@ -33,6 +37,10 @@ public final class WorkflowBuilder {
     private final List<Edge> edges = new ArrayList<>();
     private boolean eagerInit;
 
+    private Clock clock = SystemClock.getInstance();
+    private ProcessingTimerMode timerMode = ProcessingTimerMode.OPPORTUNISTIC;
+    private BackgroundTimerListener bgListener;
+
     // node kind tracking for validation
     private final Map<String, Kind> nodeKinds = new LinkedHashMap<>();
 
@@ -42,6 +50,43 @@ public final class WorkflowBuilder {
 
     public WorkflowBuilder initializeAtBuild() {
         this.eagerInit = true;
+        return this;
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // clock & timer mode
+    // --------------------------------------------------------------------------------------------
+
+    public WorkflowBuilder clock(Clock clock) {
+        if (clock == null) {
+            throw new IllegalArgumentException("clock must not be null");
+        }
+        this.clock = clock;
+        return this;
+    }
+
+    public WorkflowBuilder setProcessingTimerMode(ProcessingTimerMode mode) {
+        if (mode == null) {
+            throw new IllegalArgumentException("timer mode must not be null");
+        }
+        this.timerMode = mode;
+        return this;
+    }
+
+    public WorkflowBuilder setProcessingTimerMode(
+            ProcessingTimerMode mode, BackgroundTimerListener listener) {
+        if (mode == null) {
+            throw new IllegalArgumentException("timer mode must not be null");
+        }
+        if (listener == null) {
+            throw new IllegalArgumentException("BackgroundTimerListener must not be null");
+        }
+        if (mode != ProcessingTimerMode.BACKGROUND) {
+            throw new IllegalArgumentException(
+                    "BackgroundTimerListener is only valid with BACKGROUND mode");
+        }
+        this.timerMode = mode;
+        this.bgListener = listener;
         return this;
     }
 
@@ -81,14 +126,12 @@ public final class WorkflowBuilder {
     // source registration
     // --------------------------------------------------------------------------------------------
 
-    /** Passthrough source (untyped). */
     public WorkflowBuilder addSource(String id) {
         sources.put(requireUnique(id, "source"), new StandaloneSource<>());
         nodeKinds.put(id, Kind.SOURCE);
         return this;
     }
 
-    /** Passthrough source with single type (same in/out). */
     public WorkflowBuilder addSource(String id, TypeInformation<?> ioType) {
         addSource(id);
         inputTypes.put(id, ioType);
@@ -96,7 +139,6 @@ public final class WorkflowBuilder {
         return this;
     }
 
-    /** Passthrough source with explicit input/output types. */
     public WorkflowBuilder addSource(String id, TypeInformation<?> inType, TypeInformation<?> outType) {
         addSource(id);
         inputTypes.put(id, inType);
@@ -104,14 +146,12 @@ public final class WorkflowBuilder {
         return this;
     }
 
-    /** Custom source. */
     public WorkflowBuilder addSource(String id, StandaloneSource<?, ?> source) {
         sources.put(requireUnique(id, "source"), source);
         nodeKinds.put(id, Kind.SOURCE);
         return this;
     }
 
-    /** Custom source with type hints. */
     public WorkflowBuilder addSource(String id, StandaloneSource<?, ?> source,
             TypeInformation<?> inType, TypeInformation<?> outType) {
         addSource(id, source);
@@ -152,13 +192,11 @@ public final class WorkflowBuilder {
     // edges
     // --------------------------------------------------------------------------------------------
 
-    /** Untyped edge routing main outputs of {@code src} into {@code dst}. */
     public WorkflowBuilder addEdge(String src, String dst) {
         edges.add(new Edge(src, dst, null, null));
         return this;
     }
 
-    /** Keyed edge: compute key per element — dst must be keyed-able (KeyedProcess, Rich*). */
     public <IN, K> WorkflowBuilder addKeyedEdge(String src, String dst, KeySelector<IN, K> keySelector) {
         if (keySelector == null) {
             throw new IllegalArgumentException("keySelector must not be null for keyed edge");
@@ -167,7 +205,6 @@ public final class WorkflowBuilder {
         return this;
     }
 
-    /** Edge routing a side output (tag) from src into dst (function or sink). */
     public WorkflowBuilder addSideOutputEdge(String src, String dst, OutputTag<?> tag) {
         if (tag == null) {
             throw new IllegalArgumentException("tag must not be null for side-output edge");
@@ -176,7 +213,6 @@ public final class WorkflowBuilder {
         return this;
     }
 
-    /** Keyed side-output edge. */
     public <IN, K> WorkflowBuilder addKeyedSideOutputEdge(String src, String dst,
             OutputTag<?> tag, KeySelector<IN, K> keySelector) {
         if (tag == null) {
@@ -189,22 +225,18 @@ public final class WorkflowBuilder {
         return this;
     }
 
-    /** Sugar: edge from a source to a function/sink. */
     public WorkflowBuilder addSourceEdge(String src, String dst) {
         return addEdge(src, dst);
     }
 
-    /** Sugar: keyed edge from a source to a keyed function. */
     public <IN, K> WorkflowBuilder addSourceEdge(String src, String dst, KeySelector<IN, K> keySelector) {
         return addKeyedEdge(src, dst, keySelector);
     }
 
-    /** Sugar: edge from a function/source to a sink (main channel). */
     public WorkflowBuilder addSinkEdge(String src, String dst) {
         return addEdge(src, dst);
     }
 
-    /** Sugar: edge routing a side output into a sink. */
     public WorkflowBuilder addSinkEdge(String src, String dst, OutputTag<?> tag) {
         return addSideOutputEdge(src, dst, tag);
     }
@@ -218,13 +250,23 @@ public final class WorkflowBuilder {
     }
 
     public StandaloneWorkflow build(boolean optOutTypeValidation) {
+        if (mode == Mode.TRANSIENT && timerMode != ProcessingTimerMode.OPPORTUNISTIC) {
+            throw new IllegalStateException(
+                    "Processing timer mode " + timerMode + " is not supported in TRANSIENT mode");
+        }
+        if (timerMode == ProcessingTimerMode.BACKGROUND && bgListener == null) {
+            throw new IllegalStateException(
+                    "BACKGROUND mode requires a BackgroundTimerListener — "
+                            + "use setProcessingTimerMode(BACKGROUND, listener)");
+        }
+
         // 1. build harnesses for Flink functions
         Map<String, NodeHarness> nodes = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : functions.entrySet()) {
-            nodes.put(entry.getKey(), HarnessFactory.create(entry.getKey(), entry.getValue()));
+            nodes.put(entry.getKey(), HarnessFactory.create(entry.getKey(), entry.getValue(), clock, mode));
         }
 
-        // 2. add sources and sinks directly (they implement NodeHarness already)
+        // 2. add sources and sinks directly
         for (Map.Entry<String, StandaloneSource<?, ?>> entry : sources.entrySet()) {
             nodes.put(entry.getKey(), entry.getValue());
         }
@@ -244,7 +286,6 @@ public final class WorkflowBuilder {
             TypeInformation<?> dstIn = inputTypes.get(edge.dst());
 
             if (edge.sideChannel()) {
-                // side output: source type from tag
                 TypeInformation<?> tagType = edge.sideTag().getTypeInfo();
                 if (tagType != null) {
                     if (dstIn != null && !tagType.equals(dstIn)) {
@@ -258,7 +299,6 @@ public final class WorkflowBuilder {
                                     + " — provide TypeInformation hints or opt out explicitly");
                 }
             } else {
-                // main channel
                 boolean known = srcOut != null && dstIn != null;
                 if (known && !srcOut.equals(dstIn)) {
                     throw new IllegalStateException(
@@ -272,7 +312,6 @@ public final class WorkflowBuilder {
                 }
             }
 
-            // keyed function sanity
             if (dst.requiresKeyedEdge() && !edge.keyed()) {
                 throw new IllegalStateException(
                         "KeyedProcessFunction " + edge.dst() + " received unkeyed edge from " + edge.src());
@@ -288,17 +327,28 @@ public final class WorkflowBuilder {
         List<WorkflowNode> graph = buildGraph(nodes);
         Set<String> sourceIds = Set.copyOf(sources.keySet());
         Set<String> sinkIds = Set.copyOf(sinks.keySet());
-        return new StandaloneWorkflow(nodes, edges, sourceIds, sinkIds, mode, graph);
+
+        // collect keyed harnesses for timer management
+        List<KeyedProcessFunctionHarness> keyedHarnesses = nodes.values().stream()
+                .filter(n -> n instanceof KeyedProcessFunctionHarness)
+                .map(n -> (KeyedProcessFunctionHarness) n)
+                .collect(Collectors.toList());
+
+        return new StandaloneWorkflow(
+                nodes, edges, sourceIds, sinkIds, mode, graph,
+                clock, timerMode, keyedHarnesses, bgListener);
     }
+
+    // --------------------------------------------------------------------------------------------
+    // private helpers (unchanged)
+    // --------------------------------------------------------------------------------------------
 
     private void validateTopology(Map<String, NodeHarness> nodes) {
         for (Edge edge : edges) {
-            // a source must not have inbound edges
             if (nodeKinds.get(edge.dst()) == Kind.SOURCE) {
                 throw new IllegalStateException(
                         "source node " + edge.dst() + " must not receive inbound edges (edge from " + edge.src() + ")");
             }
-            // a sink must not have outbound edges
             if (nodeKinds.get(edge.src()) == Kind.SINK) {
                 throw new IllegalStateException(
                         "sink node " + edge.src() + " must not have outbound edges (edge to " + edge.dst() + ")");

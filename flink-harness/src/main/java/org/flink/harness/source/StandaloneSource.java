@@ -3,9 +3,9 @@ package org.flink.harness.source;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.util.Collector;
 import org.flink.harness.Edge;
-import org.flink.harness.harness.NodeHarness;
+import org.flink.harness.functions.NodeHarness;
 import org.flink.harness.internal.RecordingCollector;
-import org.flink.harness.internal.StandaloneOperatorMetricGroup;
+import org.flink.harness.metrics.StandaloneOperatorMetricGroup;
 import org.flink.harness.result.FunctionResult;
 
 import java.util.ArrayList;

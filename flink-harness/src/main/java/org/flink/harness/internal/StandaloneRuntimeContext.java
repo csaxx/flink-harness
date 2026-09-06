@@ -1,6 +1,5 @@
 package org.flink.harness.internal;
 
-import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.JobInfo;
 import org.apache.flink.api.common.TaskInfo;
 import org.apache.flink.api.common.accumulators.Accumulator;
@@ -24,8 +23,9 @@ import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.metrics.groups.OperatorMetricGroup;
+import org.flink.harness.metrics.StandaloneOperatorMetricGroup;
+import org.flink.harness.state.InMemoryKeyedStateStore;
 
 import java.io.Serializable;
 import java.util.List;

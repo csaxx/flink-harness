@@ -1,4 +1,4 @@
-package org.flink.harness.harness;
+package org.flink.harness.functions;
 
 import org.apache.flink.api.common.functions.RichFunction;
 import org.apache.flink.api.common.functions.RichFilterFunction;

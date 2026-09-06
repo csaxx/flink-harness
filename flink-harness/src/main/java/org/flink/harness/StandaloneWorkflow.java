@@ -5,12 +5,20 @@ import org.apache.flink.metrics.Gauge;
 import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.Meter;
 import org.apache.flink.metrics.Metric;
-import org.flink.harness.harness.NodeHarness;
-import org.flink.harness.internal.StandaloneMetricGroup;
+import org.apache.flink.util.clock.Clock;
+import org.flink.harness.functions.KeyedProcessFunctionHarness;
+import org.flink.harness.functions.NodeHarness;
+import org.flink.harness.metrics.StandaloneMetricGroup;
 import org.flink.harness.result.FunctionResult;
 import org.flink.harness.result.WorkflowResult;
+import org.flink.harness.timer.BackgroundTimerListener;
+import org.flink.harness.timer.BackgroundTimerThread;
+import org.flink.harness.timer.ProcessingTimerMode;
+import org.flink.harness.timer.TimerHeap;
+import org.flink.harness.timer.WorkflowTimerService;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,6 +34,9 @@ import java.util.concurrent.locks.ReentrantLock;
  * <p>Thread-safe by design: the entire {@link #process} call (and all clear/close operations)
  * is guarded by a single lock. Concurrent {@code process} invocations serialize on the same
  * workflow; separate workflow instances run without contention.
+ *
+ * <p>Timer support: processing-time only in this version. Timers are keyed-only
+ * (Flink-faithful). See {@link ProcessingTimerMode} for firing semantics.
  */
 public final class StandaloneWorkflow {
 
@@ -37,32 +48,75 @@ public final class StandaloneWorkflow {
     private final Set<String> sinkIds;
     private final Mode mode;
     private final List<WorkflowNode> graph;
-    private boolean closed;
+    private final Clock clock;
+    private final ProcessingTimerMode timerMode;
+    private final List<KeyedProcessFunctionHarness> keyedHarnesses;
+    private final WorkflowTimerService timerService;
+    private final BackgroundTimerThread backgroundThread;
+    private volatile boolean closed;
 
-    StandaloneWorkflow(Map<String, NodeHarness> nodes, List<Edge> edges,
-            Set<String> sourceIds, Set<String> sinkIds,
-            Mode mode, List<WorkflowNode> graph) {
+    private volatile Throwable bgFailure;
+
+    StandaloneWorkflow(
+            Map<String, NodeHarness> nodes,
+            List<Edge> edges,
+            Set<String> sourceIds,
+            Set<String> sinkIds,
+            Mode mode,
+            List<WorkflowNode> graph,
+            Clock clock,
+            ProcessingTimerMode timerMode,
+            List<KeyedProcessFunctionHarness> keyedHarnesses,
+            BackgroundTimerListener bgListener) {
         this.nodes = nodes;
         this.edges = edges;
         this.sourceIds = sourceIds;
         this.sinkIds = sinkIds;
         this.outboundEdges = new LinkedHashMap<>();
         for (Edge edge : edges) {
-            outboundEdges.computeIfAbsent(edge.src(), k -> new java.util.ArrayList<>()).add(edge);
+            outboundEdges.computeIfAbsent(edge.src(), k -> new ArrayList<>()).add(edge);
         }
         this.mode = mode;
         this.graph = graph;
+        this.clock = clock;
+        this.timerMode = timerMode;
+        this.keyedHarnesses = keyedHarnesses;
+        this.timerService = new WorkflowTimerService(
+                this::fireProcessingTimersInternal, this::pendingTimerCountInternal);
+
+        if (timerMode == ProcessingTimerMode.BACKGROUND) {
+            this.backgroundThread = new BackgroundTimerThread(
+                    () -> backgroundFireAndRoute(),
+                    bgListener);
+            this.backgroundThread.start();
+        } else {
+            this.backgroundThread = null;
+        }
+    }
+
+    private WorkflowResult backgroundFireAndRoute() {
+        lock.lock();
+        try {
+            checkFailed();
+            Deque<Invocation> queue = new ArrayDeque<>();
+            fireDueTimers(clock.absoluteTimeMillis(), queue);
+            if (queue.isEmpty()) {
+                return null;
+            }
+            return drainBfsQueue(queue);
+        } finally {
+            lock.unlock();
+        }
     }
 
     // --------------------------------------------------------------------------------------------
     // execute
     // --------------------------------------------------------------------------------------------
 
-    /** Feed all elements through the graph starting at {@code sourceId}.
-     * Guarded by the workflow lock; in TRANSIENT mode the reset also happens within the lock. */
     public WorkflowResult process(List<?> inputs, String sourceId) {
         lock.lock();
         try {
+            checkFailed();
             return doProcess(inputs, sourceId);
         } finally {
             if (mode == Mode.TRANSIENT) {
@@ -70,6 +124,10 @@ public final class StandaloneWorkflow {
             }
             lock.unlock();
         }
+    }
+
+    public WorkflowTimerService getTimerService() {
+        return timerService;
     }
 
     private WorkflowResult doProcess(List<?> inputs, String sourceId) {
@@ -83,6 +141,17 @@ public final class StandaloneWorkflow {
             queue.add(new Invocation(sourceId, input, null));
         }
 
+        if (timerMode == ProcessingTimerMode.OPPORTUNISTIC) {
+            return drainBfsQueueOpportunistic(queue);
+        }
+        return drainBfsQueue(queue);
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // BFS queue drainage
+    // --------------------------------------------------------------------------------------------
+
+    private WorkflowResult drainBfsQueue(Deque<Invocation> queue) {
         Map<String, List<Object>> outputsAgg = new LinkedHashMap<>();
 
         while (!queue.isEmpty()) {
@@ -94,30 +163,140 @@ public final class StandaloneWorkflow {
 
             FunctionResult<?> result = node.processViaEdge(inv.element(), inv.inboundEdge());
 
-            // sinks collect outputs unconditionally
             if (sinkIds.contains(inv.functionId())) {
-                outputsAgg.computeIfAbsent(inv.functionId(), k -> new java.util.ArrayList<>())
+                outputsAgg.computeIfAbsent(inv.functionId(), k -> new ArrayList<>())
                         .addAll(result.outputs());
             }
 
-            List<Edge> outbound = outboundEdges.getOrDefault(inv.functionId(), List.of());
-            for (Edge edge : outbound) {
-                List<?> transported;
-                if (edge.sideChannel()) {
-                    transported = result.sideOutputs().get(edge.sideTag());
-                    if (transported == null) {
-                        continue; // no elements for this side output
-                    }
-                } else {
-                    transported = result.outputs();
-                }
-                for (Object out : transported) {
-                    queue.add(new Invocation(edge.dst(), out, edge));
-                }
-            }
+            routeResult(inv.functionId(), result, queue);
         }
 
-        // per-function results (only functions with >=1 of outputs/sideOutputs/metrics)
+        return buildWorkflowResult(outputsAgg);
+    }
+
+    private WorkflowResult drainBfsQueueOpportunistic(Deque<Invocation> queue) {
+        Map<String, List<Object>> outputsAgg = new LinkedHashMap<>();
+
+        while (!queue.isEmpty()) {
+            Invocation inv = queue.poll();
+            NodeHarness node = nodes.get(inv.functionId());
+            if (node == null) {
+                throw new IllegalStateException("unknown node id: " + inv.functionId());
+            }
+
+            FunctionResult<?> result = node.processViaEdge(inv.element(), inv.inboundEdge());
+
+            if (sinkIds.contains(inv.functionId())) {
+                outputsAgg.computeIfAbsent(inv.functionId(), k -> new ArrayList<>())
+                        .addAll(result.outputs());
+            }
+
+            routeResult(inv.functionId(), result, queue);
+
+            fireDueTimers(clock.absoluteTimeMillis(), queue);
+
+            while (!queue.isEmpty()) {
+                Invocation nxt = queue.poll();
+                NodeHarness n = nodes.get(nxt.functionId());
+                if (n == null) throw new IllegalStateException("unknown node id: " + nxt.functionId());
+
+                FunctionResult<?> nr = n.processViaEdge(nxt.element(), nxt.inboundEdge());
+
+                if (sinkIds.contains(nxt.functionId())) {
+                    outputsAgg.computeIfAbsent(nxt.functionId(), k -> new ArrayList<>())
+                            .addAll(nr.outputs());
+                }
+
+                routeResult(nxt.functionId(), nr, queue);
+
+                fireDueTimers(clock.absoluteTimeMillis(), queue);
+            }
+
+            fireDueTimers(clock.absoluteTimeMillis(), queue);
+        }
+
+        return buildWorkflowResult(outputsAgg);
+    }
+
+    private void routeResult(String srcId, FunctionResult<?> result, Deque<Invocation> queue) {
+        List<Edge> outbound = outboundEdges.getOrDefault(srcId, List.of());
+        for (Edge edge : outbound) {
+            List<?> transported;
+            if (edge.sideChannel()) {
+                transported = result.sideOutputs().get(edge.sideTag());
+                if (transported == null) {
+                    continue;
+                }
+            } else {
+                transported = result.outputs();
+            }
+            for (Object out : transported) {
+                queue.add(new Invocation(edge.dst(), out, edge));
+            }
+        }
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Timer management
+    // --------------------------------------------------------------------------------------------
+
+    private WorkflowResult fireProcessingTimersInternal() {
+        lock.lock();
+        try {
+            checkFailed();
+            Deque<Invocation> queue = new ArrayDeque<>();
+            fireDueTimers(clock.absoluteTimeMillis(), queue);
+            Map<String, List<Object>> outputsAgg = new LinkedHashMap<>();
+            while (!queue.isEmpty()) {
+                Invocation inv = queue.poll();
+                NodeHarness node = nodes.get(inv.functionId());
+                if (node == null) {
+                    throw new IllegalStateException("unknown node id: " + inv.functionId());
+                }
+                FunctionResult<?> result = node.processViaEdge(inv.element(), inv.inboundEdge());
+
+                if (sinkIds.contains(inv.functionId())) {
+                    outputsAgg.computeIfAbsent(inv.functionId(), k -> new ArrayList<>())
+                            .addAll(result.outputs());
+                }
+
+                routeResult(inv.functionId(), result, queue);
+            }
+            return buildWorkflowResult(outputsAgg);
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    private void fireDueTimers(long now, Deque<Invocation> queue) {
+        for (KeyedProcessFunctionHarness harness : keyedHarnesses) {
+            TimerHeap.TimerEntry entry;
+            while ((entry = harness.timerHeap().pollDue(now)) != null) {
+                FunctionResult<?> result = harness.fireTimer(entry);
+                routeResult(harness.getId(), result, queue);
+            }
+        }
+    }
+
+    void wakeBackground() {
+        if (backgroundThread != null) {
+            backgroundThread.notifyWake();
+        }
+    }
+
+    private long pendingTimerCountInternal() {
+        long total = 0;
+        for (KeyedProcessFunctionHarness h : keyedHarnesses) {
+            total += h.timerHeapSize();
+        }
+        return total;
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // Result aggregation
+    // --------------------------------------------------------------------------------------------
+
+    private WorkflowResult buildWorkflowResult(Map<String, List<Object>> outputsAgg) {
         Map<String, FunctionResult<Object>> results = new LinkedHashMap<>();
         for (Map.Entry<String, NodeHarness> entry : nodes.entrySet()) {
             String id = entry.getKey();
@@ -126,8 +305,6 @@ public final class StandaloneWorkflow {
 
             boolean hasOutputs = !outs.isEmpty();
             boolean hasMetrics = !metricSnap.isEmpty();
-            // side outputs of non-sink nodes are routed via edges, not collected directly;
-            // they still show up if the node happened to be a sink with side-channel edges
             if (hasOutputs || hasMetrics) {
                 results.put(id, new FunctionResult<>(outs, Map.of(), metricSnap));
             }
@@ -137,7 +314,6 @@ public final class StandaloneWorkflow {
         return new WorkflowResult(results, aggregated);
     }
 
-    /** Aggregate metrics across all nodes: counters/meters/histograms summed, gauges last-wins. */
     private Map<String, Object> aggregateAllMetrics() {
         Map<String, Object> aggregated = new LinkedHashMap<>();
         for (NodeHarness node : nodes.values()) {
@@ -160,6 +336,22 @@ public final class StandaloneWorkflow {
 
     private Map<String, Metric> metricInstances(NodeHarness node) {
         return ((StandaloneMetricGroup) node.unwrapMetricGroup()).metricInstances();
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // lifecycle
+    // --------------------------------------------------------------------------------------------
+
+    private void checkFailed() {
+        if (bgFailure != null) {
+            throw new RuntimeException(
+                    "Background timer thread failed with: " + bgFailure.getMessage(), bgFailure);
+        }
+        if (backgroundThread != null && backgroundThread.state() == BackgroundTimerThread.State.FAILED) {
+            bgFailure = backgroundThread.failure();
+            throw new RuntimeException(
+                    "Background timer thread failed with: " + bgFailure.getMessage(), bgFailure);
+        }
     }
 
     private void resetTransient() {
@@ -253,6 +445,9 @@ public final class StandaloneWorkflow {
         try {
             if (!closed) {
                 closed = true;
+                if (backgroundThread != null) {
+                    backgroundThread.close();
+                }
                 nodes.values().forEach(NodeHarness::close);
             }
         } finally {

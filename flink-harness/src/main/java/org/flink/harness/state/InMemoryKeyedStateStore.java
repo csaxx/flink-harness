@@ -1,4 +1,4 @@
-package org.flink.harness.internal;
+package org.flink.harness.state;
 
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.functions.AggregateFunction;

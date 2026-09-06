@@ -44,7 +44,7 @@ If you change any of these, update this section AND re-evaluate all code.
 | Side outputs (OutputTag) | ✔ implement (routable as side-channel edges to any node) |
 | v1 state (Value/List/Map/Reducing/Aggregating) via `RuntimeContext.get*State(v1)` | ✔ in-memory per-key maps, no serialization |
 | v2 state (`org.apache.flink.api.common.state.v2.*`) | ✗ `UnsupportedOperationException` |
-| Timers / `TimerService` | ✗ deferred to v2 |
+| Timers — processing-time (keyed only) | ✔ three modes: OPPORTUNISTIC, MANUAL, BACKGROUND; per-(key, ts) dedup; event-time: UOE (future work) |
 | Accumulators, broadcast variables, distributed cache | ✗ `UnsupportedOperationException` |
 | `createSerializer`, `getGlobalJobParameters`, `getUserCodeClassLoader` | ✗ `UnsupportedOperationException` |
 | StandaloneSource / StandaloneSink | ✔ concrete, subclassable, default passthrough |
@@ -61,12 +61,13 @@ If you change any of these, update this section AND re-evaluate all code.
 - `open(OpenContext)` called once (OpenContext is empty interface — pass singleton).
 - `close()` called when the workflow is torn down.
 - **Type-safe public surface, raw types inside** — raw/unchecked `@SuppressWarnings`
-  confined to five helpers:
+  confined to six helpers:
   1. Collector adapter (main + side output routing)
   2. KeySelector invocation (`apply(I)` cast)
   3. OutputTag lookup by tag-id (side-channel edge)
   4. Current-key binding
   5. Source passthrough cast (`StandaloneSource.process` default)
+  6. OnTimerContext instantiation (anonymous inner class through `function.new OnTimerContext()` — same technique as Context)
 
 ### Type safety
 
@@ -75,22 +76,25 @@ If you change any of these, update this section AND re-evaluate all code.
 - Opt-out edges fall back to per-element `ClassCastException` naming the edge and function ids.
 - `getWorkflow()` returns DAG tuples annotated with resolved `TypeInformation` and `WorkflowNode.Kind` (SOURCE/FUNCTION/INK).
 
-### WorkflowBuilder surface (API, 2026-09-03)
+### WorkflowBuilder surface (API, 2026-09-03, updated 2026-09-07 with timers)
 
 ```java
 new WorkflowBuilder(mode)
-  .initializeAtBuild()c                                 // optional: open() all functions at build()
-  .addSource("sourceId")                                // default passthrough source
-  .addSource("id", inType, outType)                     // with type hints
-  .addSource("id", customSource)                         // custom subclass
+  .initializeAtBuild()                                   // optional: open() all functions at build()
+  .clock(Clock)                                          // optional: pluggable clock (default SystemClock)
+  .setProcessingTimerMode(OPPORTUNISTIC)                 // OPPORTUNISTIC | MANUAL | BACKGROUND
+  .setProcessingTimerMode(BACKGROUND, listener)          // with callback listener for results/errors
+  .addSource("sourceId")                                 // default passthrough source
+  .addSource("id", inType, outType)                      // with type hints
+  .addSource("id", customSource)                          // custom subclass
   .registerFunction("id", functionInstance)               // ProcessFunction, RichMap, etc.
   .registerKeyedFunction("id", keyedFunctionInstance)
   .addSink("sinkId")                                     // default collecting sink
-  .addSink("id", customink)                            // custom subclass
+  .addSink("id", customink)                             // custom subclass
   .addSourceEdge("srcId", "dstId")                      // source → node
   .addEdge("srcId", "dstId")                            // main channel edge
-  .addKeyedEdge("srcId", "dstId", keySelector)      // keyed main channel
-  .addSideOutputEdge("srcId","dstId", tag)            // side channel edge (general)
+  .addKeyedEdge("srcId", "dstId", keySelector)          // keyed main channel
+  .addSideOutputEdge("srcId","dstId", tag)              // side channel edge (general)
   .addSinkEdge("srcId", "dstId"[, tag])                  // sink terminal edge (sugar)
   .build()
 ```
@@ -99,11 +103,39 @@ new WorkflowBuilder(mode)
 
 Modes: `CONTINUOUS` (metrics & state accumulate like real Flink; manual `clearState(id)` / `clearStateAll()` / `clearMetrics()`) and `TRANSIENT` (everything cleared after each `process()` call, including on exception via try/finally).
 
+### Processing-time timers (2026-09-07)
+
+| Aspect | Detail |
+|---|---|
+| Availability | Keyed functions only (`KeyedProcessFunction`); non-keyed `ProcessFunction` gets query-only TimerService |
+| Dedup | One timer per `(key, timestamp)`; registering the same `(key, ts)` twice is a no-op |
+| Delete | `deleteProcessingTimeTimer(ts)` deletes the current key's timer at that timestamp; silent no-op if absent |
+| From `onTimer` | Timers can be registered/deregistered inside `onTimer`; chaining works |
+| Event time | `registerEventTimeTimer`/`deleteEventTimeTimer` throw UOE (future work); `currentWatermark()` returns `Long.MIN_VALUE` |
+| TRANSIENT | `registerProcessingTimeTimer` throws UOE; `currentProcessingTime()` and `currentWatermark()` still work |
+
+#### ProcessingTimerMode (exclusive, chosen at build)
+
+| Mode | Firing mechanism |
+|---|---|
+| `OPPORTUNISTIC` (default) | Due timers fire after each element invocation in `process()` and at the end of `process()`. `fireProcessingTimers()` callable as explicit nudge. |
+| `MANUAL` | Timers never fire automatically. `getTimerService().fireProcessingTimers(): WorkflowResult` is the only firing path. |
+| `BACKGROUND` | A single daemon thread per workflow polls for due timers (~100ms interval). Acquires the workflow lock before firing (no interleaving with `process()`). Results/errors delivered via `BackgroundTimerListener`. `fireProcessingTimers()` also callable. |
+
+#### API additions
+
+```java
+StandaloneWorkflow.getTimerService()
+    .fireProcessingTimers()      // WorkflowResult — fires all due timers across all keyed nodes
+    .pendingTimerCount()         // long — count of all pending timers across all keyed harnesses
+```
+
 ### Thread safety
 
 - Thread-safe by default. One `ReentrantLock` on each `StandaloneWorkflow` guards the entire `process()` call and every `clear*`/`close()` operation (including the TRANSIENT reset, executed within the lock in the same `try/finally` that eventually unlocks).
 - Multiple workflows do not contend; separate instances have separate locks.
 - Direct harness access (`harness.processViaEdge`) is deliberately unlocked — the workflow is the only supported multithreaded entry point.
+- **BACKGROUND timer thread**: a single daemon thread per workflow that acquires the workflow lock before firing timers, guaranteeing `onTimer` never interleaves with `processElement`. The listener is invoked after releasing the lock to avoid deadlocks if the listener calls back into the workflow.
 
 ### Dependency sliminess
 
@@ -121,10 +153,11 @@ All operators run with parallelism-1 semantics (single "subtask"). No key redist
 | Package | Audience |
 |---|---|
 | `org.flink.harness` | Consumer API — `WorkflowBuilder`, `StandaloneWorkflow`, `WorkflowResult`, `WorkflowNode`, `Mode`, `Edge` |
-| `org.flink.harness.harness` | Nodes — `NodeHarness` (interface), `FunctionHarness` + subtypes, `HarnessFactory` (public, not API) |
+| `org.flink.harness.functions` | Nodes — `NodeHarness` (interface), `FunctionHarness` + subtypes, `HarnessFactory` (public, not API) |
 | `org.flink.harness.source` | `StandaloneSource` — public API, subclassable |
 | `org.flink.harness.sink` | `StandaloneSink` — public API, subclassable |
 | `org.flink.harness.internal` | Implementation — `SandaloneRuntimeContext`, state store, collector, metric group. Do not import; public only because Java package visibility does not cross packages. |
+| `org.flink.harness.timer` | Timer service — `ProcessingTimerMode`, `BackgroundTimerListener`, `WorkflowTimerService`, `StandaloneTimerService`, `TimerHeap`, `BackgroundTimerThread`. Consumer API for timer management. |
 
 ## Agent directives
 
