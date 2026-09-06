@@ -32,19 +32,21 @@ a custom `RuntimeContext`, recording collectors, per-key in-memory state, and a
 import org.flink.harness.*;
 
 StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
-    .registerFunction("parse", new MyParseFn())
-    .registerKeyedFunction("accum", new MyKeyedFn())
-    .addSink("out")
+    .addSource("in")                                          // source node — entry point for inputs
+    .registerFunction("parse", new MyParseFn())               // ProcessFunction, RichMap, etc.
+    .registerKeyedFunction("accum", new MyKeyedFn())          // KeyedProcessFunction
+    .addSink("out")                                           // terminal collector
+    .addSourceEdge("in", "parse")                             // source → function
     .addEdge("parse", "accum")
     .addEdge("accum", "out")
     .build();
 
-WorkflowResult result = wf.process(List.of("line1", "line2"), "parse");
+// Feed elements through the graph starting at the "in" source
+WorkflowResult result = wf.process(List.of("line1", "line2"), "in");
 
 result.functionResults()          // Map<nodeId, FunctionResult> for nodes with ≥1 output or metric
 result.aggregatedMetrics()        // flat cross-node map: counters/meters/histograms summed, gauges last-wins
 result.outputsOf("out")           // convenience: all elements collected by the sink
-result.sideOutputsOf("route", tag) // convenience: side outputs for a tag from one node
 ```
 
 ## Build a workflow
@@ -172,6 +174,33 @@ wf.close();  // calls close() on all nodes (idempotent, guarded by lock)
 | CoProcessFunction / connected streams | ✗ planned |
 | BroadcastProcessFunction | ✗ planned |
 | Parallelism > 1 | ✗ all operators run with parallelism-1 semantics |
+
+## Missing features
+
+Flink features that are **not** supported (no plan to add):
+
+| Feature | Reason |
+|---------|--------|
+| Windows (assigners/triggers/evictors) | Can emulate with keyed state + timers |
+| Async I/O | Needs runtime async executor machinery |
+| FLIP-27 Source/Sink interfaces | `process()` is the source; `StandaloneSink` covers sinks |
+| v2 state API (`org.apache.flink.api.common.state.v2.*`) | Experimental in Flink 2.3 |
+| State TTL (`StateTtlConfig`) | Deferred; needs time infrastructure |
+| Accumulators | Superseded by metrics |
+| Broadcast variables / distributed cache | DataSet legacy |
+| Feedback iterations | No termination guard |
+| Parallelism > 1 | Frozen design decision — all operators run with parallelism-1 semantics |
+
+Features **planned** for future versions:
+
+| Feature | Notes |
+|---------|-------|
+| Event-time timers + watermarks | See FUTURE.md |
+| CoProcessFunction / connected streams | See FUTURE.md |
+| BroadcastProcessFunction / BroadcastState | See FUTURE.md |
+| RichSinkFunction harness | See FUTURE.md |
+| CheckpointedFunction / operator state | On demand only |
+| `createSerializer`, `getGlobalJobParameters` | Cheap fillers |
 
 ## Package overview
 
