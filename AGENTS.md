@@ -30,6 +30,7 @@ flink-harness-parent (pom; aggregator, Java 21, Flink 2.3.0)
 - Java 21 (GraalVM 25)
 - Flink 2.3.0 (all artifacts)
 - JUnit 5.11.4, AssertJ 3.27.3
+- Jackson 2.18.3 (jackson-databind, provided scope for JsonSource/JsonSink)
 
 ## Frozen design decisions
 
@@ -47,6 +48,7 @@ If you change any of these, update this section AND re-evaluate all code.
 | Accumulators, broadcast variables, distributed cache | ✗ `UnsupportedOperationException` |
 | `createSerializer`, `getGlobalJobParameters`, `getUserCodeClassLoader` | ✗ `UnsupportedOperationException` |
 | StandaloneSource / StandaloneSink | ✔ concrete, subclassable, default passthrough |
+| JsonSource / JsonSink | ✔ convenience, Jackson-databind (provided scope) |
 | Side-channel edges (OutputTag on `Edge`) | ✔ main/side output routing via `sideTag == null` |
 
 ### Harness approach (2026-09-03)
@@ -107,6 +109,8 @@ Modes: `CONTINUOUS` (metrics & state accumulate like real Flink; manual `clearSt
 
 `flink-streaming-java` is the only compile dependency (pulls `flink-runtime`,
 `flink-core`, `flink-shaded-guava`, `commons-math3` + sfl4j transitevely). This library does **not** instantiate any runtim classes — the transiteve runtime classpath is inert. A dedicated `DependencyTreeTest` in `flink-standalone` enforces that no `flink-test-utils`, `flink-clients`, or `flink-runtime-test` artifacts slip into the production scope. The test shells out to `mvn dependency:tree` and asserts absence of the banned artifacts.
+
+Note: `JsonSource` and `JsonSink` declare `jackson-databind` as `provided` scope. Consumers of these convenience classes must supply Jackson on their classpath or add `jackson-databind` to their own POM.
 
 ### Parallelism
 
