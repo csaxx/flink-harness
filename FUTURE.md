@@ -143,7 +143,6 @@ documented.
 | Async I/O | Needs the runtime's async executor/waiter machinery |
 | FLIP-27 Source/Sink interfaces | SplitEnumerator/Reader machinery; feeding via `process()` *is* the source; §4 covers sinks |
 | State TTL (`StateTtlConfig`) | Subtle semantics; revisit after §1 (needs time infrastructure anyway) |
-| v2 state API (`state.v2.*`) | Experimental in 2.3; keep UOE |
 | Accumulators | Permanently out of scope — superseded by metrics |
 | Broadcast variables / distributed cache | DataSet legacy |
 | Feedback iterations | Queue tolerates cycles already, but no termination guard — not a feature to formalize |
@@ -158,3 +157,16 @@ documented.
 
 Each step: update AGENTS.md scope table, add tests,
 `mvn -q verify`.
+
+## Implemented (formerly out of scope — 2026-09-07)
+
+### v2 state API (`org.apache.flink.api.common.state.v2.*`)
+
+**Decision (2026-09-07).** Removed from out-of-scope and implemented in full:
+all 5 state kinds (Value/List/Map/Reducing/Aggregating), sync + async methods,
+eager `StateFuture`/`StateIterator` (continuations run immediately on the caller
+thread), isolated v2 namespace in the same in-memory per-key store, TTL-enabled
+descriptors rejected with UOE. ~500 LoC total. Rationale: interfaces live in
+`flink-core-api` (already on the compile classpath transitively via `flink-core`),
+descriptors reuse v1 `ReduceFunction`/`AggregateFunction`, and the eager-future
+model is a faithful deterministic emulation for a synchronous harness.

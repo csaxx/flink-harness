@@ -23,12 +23,15 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 /**
- * Minimal in-memory keyed state store backing {@code RuntimeContext.get*State(...)} v1 calls.
- * Accessors resolve the current key's map per operation (correct per-key isolation).
+ * Minimal in-memory keyed state store backing {@code RuntimeContext.get*State(...)} calls
+ * for both v1 and v2 state APIs. Accessors resolve the current key's map per operation
+ * (correct per-key isolation). V2 entries are namespaced with a {@code "v2:"} prefix to
+ * avoid collisions with v1 states of the same name. TTL-enabled v2 descriptors are rejected.
  */
 public final class InMemoryKeyedStateStore {
 
     private static final ExecutionConfig EXECUTION_CONFIG = new ExecutionConfig();
+    private static final String V2_PREFIX = "v2:";
 
     private final Map<Object, Map<String, Object>> stateByKey = new HashMap<>();
     private Object currentKey;
@@ -76,6 +79,55 @@ public final class InMemoryKeyedStateStore {
     private static <D extends StateDescriptor> D prepare(D descriptor) {
         descriptor.initializeSerializerUnlessSet(EXECUTION_CONFIG);
         return descriptor;
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // v2 keyed state — fully-qualified types to avoid collision with v1 imports
+    // --------------------------------------------------------------------------------------------
+
+    public <T> org.apache.flink.api.common.state.v2.ValueState<T> getState(
+            org.apache.flink.api.common.state.v2.ValueStateDescriptor<T> descriptor) {
+        checkTtl(descriptor);
+        descriptor.initializeSerializerUnlessSet(EXECUTION_CONFIG);
+        return new InMemoryStateV2.ValueStateV2<>(this::backing, V2_PREFIX + descriptor.getStateId());
+    }
+
+    public <T> org.apache.flink.api.common.state.v2.ListState<T> getListState(
+            org.apache.flink.api.common.state.v2.ListStateDescriptor<T> descriptor) {
+        checkTtl(descriptor);
+        descriptor.initializeSerializerUnlessSet(EXECUTION_CONFIG);
+        return new InMemoryStateV2.ListStateV2<>(this::backing, V2_PREFIX + descriptor.getStateId());
+    }
+
+    public <T> org.apache.flink.api.common.state.v2.ReducingState<T> getReducingState(
+            org.apache.flink.api.common.state.v2.ReducingStateDescriptor<T> descriptor) {
+        checkTtl(descriptor);
+        descriptor.initializeSerializerUnlessSet(EXECUTION_CONFIG);
+        return new InMemoryStateV2.ReducingStateV2<>(
+                this::backing, V2_PREFIX + descriptor.getStateId(), descriptor.getReduceFunction());
+    }
+
+    public <IN, ACC, OUT> org.apache.flink.api.common.state.v2.AggregatingState<IN, OUT> getAggregatingState(
+            org.apache.flink.api.common.state.v2.AggregatingStateDescriptor<IN, ACC, OUT> descriptor) {
+        checkTtl(descriptor);
+        descriptor.initializeSerializerUnlessSet(EXECUTION_CONFIG);
+        return new InMemoryStateV2.AggregatingStateV2<>(
+                this::backing, V2_PREFIX + descriptor.getStateId(), descriptor.getAggregateFunction());
+    }
+
+    public <UK, UV> org.apache.flink.api.common.state.v2.MapState<UK, UV> getMapState(
+            org.apache.flink.api.common.state.v2.MapStateDescriptor<UK, UV> descriptor) {
+        checkTtl(descriptor);
+        descriptor.initializeSerializerUnlessSet(EXECUTION_CONFIG);
+        return new InMemoryStateV2.MapStateV2<>(this::backing, V2_PREFIX + descriptor.getStateId());
+    }
+
+    private static void checkTtl(org.apache.flink.api.common.state.v2.StateDescriptor<?> d) {
+        if (d.getTtlConfig().isEnabled()) {
+            throw new UnsupportedOperationException(
+                    "State TTL (StateTtlConfig) is not supported by flink-harness — state '"
+                            + d.getStateId() + "'");
+        }
     }
 
     /** Backing map for the current key; must have a key bound. */

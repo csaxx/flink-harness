@@ -43,7 +43,7 @@ If you change any of these, update this section AND re-evaluate all code.
 | Metrics (Counter, Gauge, Meter) | ✔ implement |
 | Side outputs (OutputTag) | ✔ implement (routable as side-channel edges to any node) |
 | v1 state (Value/List/Map/Reducing/Aggregating) via `RuntimeContext.get*State(v1)` | ✔ in-memory per-key maps, no serialization |
-| v2 state (`org.apache.flink.api.common.state.v2.*`) | ✗ `UnsupportedOperationException` |
+| v2 state (`org.apache.flink.api.common.state.v2.*`) | ✔ in-memory per-key, eager `StateFuture`/`StateIterator`; TTL-enabled descriptors rejected (UOE) |
 | Timers — processing-time (keyed only) | ✔ three modes: OPPORTUNISTIC, MANUAL, BACKGROUND; per-(key, ts) dedup; event-time: UOE (future work) |
 | `createSerializer` | ✔ via `TypeInformation.createSerializer(new SerializerConfigImpl())` |
 | `getGlobalJobParameters` | ✔ via `WorkflowBuilder.globalJobParameters(map)` |
@@ -64,13 +64,14 @@ If you change any of these, update this section AND re-evaluate all code.
 - `open(OpenContext)` called once (OpenContext is empty interface — pass singleton).
 - `close()` called when the workflow is torn down.
 - **Type-safe public surface, raw types inside** — raw/unchecked `@SuppressWarnings`
-  confined to six helpers:
+  confined to seven helpers:
   1. Collector adapter (main + side output routing)
   2. KeySelector invocation (`apply(I)` cast)
   3. OutputTag lookup by tag-id (side-channel edge)
   4. Current-key binding
   5. Source passthrough cast (`StandaloneSource.process` default)
   6. OnTimerContext instantiation (anonymous inner class through `function.new OnTimerContext()` — same technique as Context)
+  7. v2 state completions — `CompletedStateFuture.resolve()` cast to extract the synchronous value (confined to `org.flink.harness.state`)
 
 ### Type safety
 
@@ -160,7 +161,8 @@ All operators run with parallelism-1 semantics (single "subtask"). No key redist
 | `org.flink.harness.functions` | Nodes — `NodeHarness` (interface), `FunctionHarness` + subtypes, `HarnessFactory` (public, not API) |
 | `org.flink.harness.source` | `StandaloneSource` — public API, subclassable |
 | `org.flink.harness.sink` | `StandaloneSink` — public API, subclassable |
-| `org.flink.harness.internal` | Implementation — `SandaloneRuntimeContext`, state store, collector, metric group. Do not import; public only because Java package visibility does not cross packages. |
+| `org.flink.harness.internal` | Implementation — `SandaloneRuntimeContext`, collector, metric group. Do not import; public only because Java package visibility does not cross packages. |
+| `org.flink.harness.state` | Implementation — `InMemoryKeyedStateStore` (v1+v2 keyed state), `CompletedStateFuture`, `CollectionStateIterator`, `InMemoryStateV2`. Public only because Java package visibility does not cross packages; not API. |
 | `org.flink.harness.timer` | Timer service — `ProcessingTimerMode`, `BackgroundTimerListener`, `WorkflowTimerService`, `StandaloneTimerService`, `TimerHeap`, `BackgroundTimerThread`. Consumer API for timer management. |
 
 ## Agent directives

@@ -170,7 +170,7 @@ wf.close();  // calls close() on all nodes (idempotent, guarded by lock)
 | Timers / TimerService | ✔ three modes: OPPORTUNISTIC, MANUAL, BACKGROUND |
 | `createSerializer` | ✔ via `SerializerConfigImpl` |
 | `getGlobalJobParameters` | ✔ via `WorkflowBuilder.globalJobParameters(map)` |
-| v2 state (`org.apache.flink.api.common.state.v2.*`) | ✗ `UnsupportedOperationException` |
+| v2 state (`org.apache.flink.api.common.state.v2.*`) | ✔ in-memory per-key, eager `StateFuture`; TTL-enabled descriptors rejected |
 | Accumulators, broadcast variables, distributed cache | ✗ `UnsupportedOperationException` |
 | CoProcessFunction / connected streams | ✗ planned |
 | BroadcastProcessFunction | ✗ planned |
@@ -185,7 +185,6 @@ Flink features that are **not** supported (no plan to add):
 | Windows (assigners/triggers/evictors) | Can emulate with keyed state + timers |
 | Async I/O | Needs runtime async executor machinery |
 | FLIP-27 Source/Sink interfaces | `process()` is the source; `StandaloneSink` covers sinks |
-| v2 state API (`org.apache.flink.api.common.state.v2.*`) | Experimental in Flink 2.3 |
 | State TTL (`StateTtlConfig`) | Deferred; needs time infrastructure |
 | Accumulators | Permanently out of scope — superseded by metrics |
 | Broadcast variables / distributed cache | DataSet legacy |
@@ -212,6 +211,8 @@ Features **planned** for future versions:
 | `org.flink.harness.sink` | `StandaloneSink` — subclassable sink base class |
 | `org.flink.harness.result` | `FunctionResult`, `WorkflowResult` — output containers |
 | `org.flink.harness.internal` | Implementation internals — do not import directly |
+| `org.flink.harness.state` | In-memory keyed state store (v1+v2), eager `StateFuture`/`StateIterator` — not API |
+| `org.flink.harness.timer` | Timer service, timer heap, processing-timer mode — consumer API |
 
 ## Build
 

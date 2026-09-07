@@ -35,10 +35,10 @@ import java.util.Set;
 
 /**
  * Standalone {@link RuntimeContext}: metrics via {@link StandaloneOperatorMetricGroup},
- * keyed state v1 via {@link InMemoryKeyedStateStore}, global job parameters via
+ * keyed state v1+v2 via {@link InMemoryKeyedStateStore}, global job parameters via
  * {@link #setGlobalJobParameters(Map)}, serializers via
- * {@link #createSerializer(TypeInformation)}. Everything else (v2 state, broadcast
- * vars, distributed cache, accumulators, ...) throws
+ * {@link #createSerializer(TypeInformation)}. Everything else (broadcast vars,
+ * distributed cache, accumulators, ...) throws
  * {@link UnsupportedOperationException}. Accumulators are permanently out of scope
  * — use metrics ({@link #getMetricGroup()}) instead.
  */
@@ -153,38 +153,38 @@ public class StandaloneRuntimeContext implements RuntimeContext {
     }
 
     // --------------------------------------------------------------------------------------------
-    // state v2 (deferred)
+    // state v2 (in-memory, eager StateFuture; TTL-enabled descriptors rejected)
     // --------------------------------------------------------------------------------------------
 
     @Override
     public <T> org.apache.flink.api.common.state.v2.ValueState<T> getState(
             org.apache.flink.api.common.state.v2.ValueStateDescriptor<T> descriptor) {
-        throw unsupported("v2 state");
+        return stateStore.getState(descriptor);
     }
 
     @Override
     public <T> org.apache.flink.api.common.state.v2.ListState<T> getListState(
             org.apache.flink.api.common.state.v2.ListStateDescriptor<T> descriptor) {
-        throw unsupported("v2 state");
+        return stateStore.getListState(descriptor);
     }
 
     @Override
     public <T> org.apache.flink.api.common.state.v2.ReducingState<T> getReducingState(
             org.apache.flink.api.common.state.v2.ReducingStateDescriptor<T> descriptor) {
-        throw unsupported("v2 state");
+        return stateStore.getReducingState(descriptor);
     }
 
     @Override
     public <IN, ACC, OUT> org.apache.flink.api.common.state.v2.AggregatingState<IN, OUT>
             getAggregatingState(
                     org.apache.flink.api.common.state.v2.AggregatingStateDescriptor<IN, ACC, OUT> descriptor) {
-        throw unsupported("v2 state");
+        return stateStore.getAggregatingState(descriptor);
     }
 
     @Override
     public <UK, UV> org.apache.flink.api.common.state.v2.MapState<UK, UV> getMapState(
             org.apache.flink.api.common.state.v2.MapStateDescriptor<UK, UV> descriptor) {
-        throw unsupported("v2 state");
+        return stateStore.getMapState(descriptor);
     }
 
     // --------------------------------------------------------------------------------------------
