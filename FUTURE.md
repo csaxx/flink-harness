@@ -17,15 +17,12 @@ single workflow lock, raw casts confined to boundary helpers, fail loudly at
 
 ---
 
-## 1. Processing-time timers — IMPLEMENTED (2026-09-07)
+## 1. Event-time timers + watermarks + processTimestamped
 
-Processing-time timers (keyed only) are fully implemented in `org.flink.harness.timer`.
-See AGENTS.md for the API surface and `KeyedTimerIntegrationTest.java` for coverage.
-Three modes: OPPORTUNISTIC (firing after each element / end of process()), MANUAL
-(firing only via `fireProcessingTimers()`), BACKGROUND (daemon thread, ~100ms poll,
-results/errors via `BackgroundTimerListener`).
+**Motivation.** Completion of the timer story: event-time timers, watermark advancement,
+and timestamped input API. Processing-time timers are already implemented (see AGENTS.md).
 
-### Remaining future work within this section
+**Remaining work items:**
 
 1. **Event-time timers + watermarks**: `advanceWatermark(long wm)`, auto-advance
    from element timestamps, `TimestampedValue` input, `registerEventTimeTimer` /
@@ -113,24 +110,14 @@ sink function into the sink node.
 extends `StandaloneSink` and wraps `RichSinkFunction`. Consumed elements are
 still recorded in `FunctionResult.outputs` (so tests assert on them);
 `SinkFunction.Context` = `currentProcessingTime`, `currentWatermark`,
-`timestamp` — trivial once §1 exists (null/defaults otherwise).
+`timestamp` — trivial once processing-time timers exist (null/defaults otherwise).
 
 **Cost.** ~100 lines. **Tests.** open/close lifecycle, metrics in sink,
 elements recorded, watermark visible in context.
 
 ---
 
-## 5. Cheap RuntimeContext fillers
-
-| Method | Implementation | Cost |
-|---|---|---|
-| `getGlobalJobParameters()` | `Map<String,String>` supplied via `WorkflowBuilder.globalJobParameters(map)`, immutable | ~15 lines |
-| `createSerializer(TypeInformation)` | `typeInfo.createSerializer(new ExecutionConfig())` — works standalone, no runtime classes | ~3 lines |
-| accumulators | **Keep UOE** — superseded by metrics; supporting them adds a parallel, redundant metrics universe | — |
-
----
-
-## 6. CheckpointedFunction / operator state (optional, lowest priority)
+## 5. CheckpointedFunction / operator state (optional, lowest priority)
 
 **Motivation.** Many library functions implement `CheckpointedFunction` and
 currently can't run at all. Parallelism-1 makes operator list state and union
@@ -152,23 +139,22 @@ documented.
 
 | Feature | Reason |
 |---|---|
-| Windows (assigners/triggers/evictors) | A runtime of its own; users can emulate most window logic with keyed state + timers (§1) |
+| Windows (assigners/triggers/evictors) | A runtime of its own; users can emulate most window logic with keyed state + timers (see AGENTS.md) |
 | Async I/O | Needs the runtime's async executor/waiter machinery |
 | FLIP-27 Source/Sink interfaces | SplitEnumerator/Reader machinery; feeding via `process()` *is* the source; §4 covers sinks |
 | State TTL (`StateTtlConfig`) | Subtle semantics; revisit after §1 (needs time infrastructure anyway) |
 | v2 state API (`state.v2.*`) | Experimental in 2.3; keep UOE |
-| Accumulators | Superseded by metrics |
+| Accumulators | Permanently out of scope — superseded by metrics |
 | Broadcast variables / distributed cache | DataSet legacy |
 | Feedback iterations | Queue tolerates cycles already, but no termination guard — not a feature to formalize |
 | Parallelism > 1 | Violates frozen design decision (parallelism-1 semantics) |
 
 ## Suggested sequencing
 
-1. [IMPLEMENTED] §1 processing-time timers
-2. §1 event-time / watermarks / processTimestamped (remaining future work)
-3. §2 CoProcessFunction, §3 broadcast (topology coverage)
-4. §4 sink + §5 fillers (completeness polish)
-5. §6 CheckpointedFunction (only on demand)
+1. §1 event-time / watermarks / processTimestamped (remaining future work)
+2. §2 CoProcessFunction, §3 broadcast (topology coverage)
+3. §4 sink (completeness polish)
+4. §5 CheckpointedFunction (only on demand)
 
-Each step: update AGENTS.md scope table + WORKING.md decision log, add tests,
+Each step: update AGENTS.md scope table, add tests,
 `mvn -q verify`.

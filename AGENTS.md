@@ -45,8 +45,11 @@ If you change any of these, update this section AND re-evaluate all code.
 | v1 state (Value/List/Map/Reducing/Aggregating) via `RuntimeContext.get*State(v1)` | ✔ in-memory per-key maps, no serialization |
 | v2 state (`org.apache.flink.api.common.state.v2.*`) | ✗ `UnsupportedOperationException` |
 | Timers — processing-time (keyed only) | ✔ three modes: OPPORTUNISTIC, MANUAL, BACKGROUND; per-(key, ts) dedup; event-time: UOE (future work) |
-| Accumulators, broadcast variables, distributed cache | ✗ `UnsupportedOperationException` |
-| `createSerializer`, `getGlobalJobParameters`, `getUserCodeClassLoader` | ✗ `UnsupportedOperationException` |
+| `createSerializer` | ✔ via `TypeInformation.createSerializer(new SerializerConfigImpl())` |
+| `getGlobalJobParameters` | ✔ via `WorkflowBuilder.globalJobParameters(map)` |
+| Accumulators | ✗ permanently out of scope — use metrics instead |
+| Broadcast variables, distributed cache | ✗ `UnsupportedOperationException` |
+| `getUserCodeClassLoader` | ✗ `UnsupportedOperationException` |
 | StandaloneSource / StandaloneSink | ✔ concrete, subclassable, default passthrough |
 | JsonSource / JsonSink | ✔ convenience, Jackson-databind (provided scope) |
 | Side-channel edges (OutputTag on `Edge`) | ✔ main/side output routing via `sideTag == null` |
@@ -76,12 +79,13 @@ If you change any of these, update this section AND re-evaluate all code.
 - Opt-out edges fall back to per-element `ClassCastException` naming the edge and function ids.
 - `getWorkflow()` returns DAG tuples annotated with resolved `TypeInformation` and `WorkflowNode.Kind` (SOURCE/FUNCTION/INK).
 
-### WorkflowBuilder surface (API, 2026-09-03, updated 2026-09-07 with timers)
+### WorkflowBuilder surface (API, 2026-09-03, updated 2026-09-07 with timers and fillers)
 
 ```java
 new WorkflowBuilder(mode)
   .initializeAtBuild()                                   // optional: open() all functions at build()
   .clock(Clock)                                          // optional: pluggable clock (default SystemClock)
+  .globalJobParameters(Map.of("k", "v"))                 // optional: job-level params (immutable, default empty)
   .setProcessingTimerMode(OPPORTUNISTIC)                 // OPPORTUNISTIC | MANUAL | BACKGROUND
   .setProcessingTimerMode(BACKGROUND, listener)          // with callback listener for results/errors
   .addSource("sourceId")                                 // default passthrough source
@@ -166,5 +170,8 @@ All operators run with parallelism-1 semantics (single "subtask"). No key redist
 - **Update this file on every change** that touches design, module stucture,
   version pins, or supported features.
 - Record decisions (reason + date), not prose.
-- After every code change, run `mvn -q verify` from root.
+- After every code change, run `mvn -q verify` from root (use `mvnw` wrapper; requires Java 21 on PATH or `JAVA_HOME`).
 - If you add a new test, make sure it passes and update the CI check section.
+- To verify Flink API signatures or class availability, check the source on GitHub
+  (`https://raw.githubusercontent.com/apache/flink/release-2.3/...`) rather than
+  inspecting local jars.

@@ -137,4 +137,13 @@ public abstract class FunctionHarness implements NodeHarness {
 
     @Override
     public abstract boolean requiresKeyedEdge();
+
+    /**
+     * Wires global job parameters into the runtime context. Called once by
+     * {@code WorkflowBuilder} at build time. Public (not API) — consumers
+     * constructing harnesses directly get the default empty map.
+     */
+    public void setGlobalJobParameters(Map<String, String> params) {
+        runtimeContext.setGlobalJobParameters(params);
+    }
 }

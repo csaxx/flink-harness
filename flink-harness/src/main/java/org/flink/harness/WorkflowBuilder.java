@@ -6,6 +6,7 @@ import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.util.OutputTag;
 import org.apache.flink.util.clock.Clock;
 import org.apache.flink.util.clock.SystemClock;
+import org.flink.harness.functions.FunctionHarness;
 import org.flink.harness.functions.HarnessFactory;
 import org.flink.harness.functions.KeyedProcessFunctionHarness;
 import org.flink.harness.functions.NodeHarness;
@@ -40,6 +41,7 @@ public final class WorkflowBuilder {
     private Clock clock = SystemClock.getInstance();
     private ProcessingTimerMode timerMode = ProcessingTimerMode.OPPORTUNISTIC;
     private BackgroundTimerListener bgListener;
+    private Map<String, String> globalJobParameters = Map.of();
 
     // node kind tracking for validation
     private final Map<String, Kind> nodeKinds = new LinkedHashMap<>();
@@ -87,6 +89,18 @@ public final class WorkflowBuilder {
         }
         this.timerMode = mode;
         this.bgListener = listener;
+        return this;
+    }
+
+    // --------------------------------------------------------------------------------------------
+    // global job parameters
+    // --------------------------------------------------------------------------------------------
+
+    public WorkflowBuilder globalJobParameters(Map<String, String> params) {
+        if (params == null) {
+            throw new IllegalArgumentException("globalJobParameters must not be null");
+        }
+        this.globalJobParameters = Map.copyOf(params);
         return this;
     }
 
@@ -263,7 +277,9 @@ public final class WorkflowBuilder {
         // 1. build harnesses for Flink functions
         Map<String, NodeHarness> nodes = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : functions.entrySet()) {
-            nodes.put(entry.getKey(), HarnessFactory.create(entry.getKey(), entry.getValue(), clock, mode));
+            FunctionHarness h = HarnessFactory.create(entry.getKey(), entry.getValue(), clock, mode);
+            h.setGlobalJobParameters(globalJobParameters);
+            nodes.put(entry.getKey(), h);
         }
 
         // 2. add sources and sinks directly

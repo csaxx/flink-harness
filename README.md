@@ -167,10 +167,11 @@ wf.close();  // calls close() on all nodes (idempotent, guarded by lock)
 | Keyed state v1 (ValueState, ListState, MapState, ReducingState, AggregatingState) | ✔ in-memory per-key, no serialization |
 | StandaloneSource / StandaloneSink — subclassable, default passthrough | ✔ |
 | Side-channel edges (OutputTag on `Edge`) — main/side routing via `sideTag == null` | ✔ |
-| Timers / TimerService | ✗ deferred to v2 |
+| Timers / TimerService | ✔ three modes: OPPORTUNISTIC, MANUAL, BACKGROUND |
+| `createSerializer` | ✔ via `SerializerConfigImpl` |
+| `getGlobalJobParameters` | ✔ via `WorkflowBuilder.globalJobParameters(map)` |
 | v2 state (`org.apache.flink.api.common.state.v2.*`) | ✗ `UnsupportedOperationException` |
 | Accumulators, broadcast variables, distributed cache | ✗ `UnsupportedOperationException` |
-| `createSerializer`, `getGlobalJobParameters`, `getUserCodeClassLoader` | ✗ `UnsupportedOperationException` |
 | CoProcessFunction / connected streams | ✗ planned |
 | BroadcastProcessFunction | ✗ planned |
 | Parallelism > 1 | ✗ all operators run with parallelism-1 semantics |
@@ -180,13 +181,13 @@ wf.close();  // calls close() on all nodes (idempotent, guarded by lock)
 Flink features that are **not** supported (no plan to add):
 
 | Feature | Reason |
-|---------|--------|
+|---------|-------|
 | Windows (assigners/triggers/evictors) | Can emulate with keyed state + timers |
 | Async I/O | Needs runtime async executor machinery |
 | FLIP-27 Source/Sink interfaces | `process()` is the source; `StandaloneSink` covers sinks |
 | v2 state API (`org.apache.flink.api.common.state.v2.*`) | Experimental in Flink 2.3 |
 | State TTL (`StateTtlConfig`) | Deferred; needs time infrastructure |
-| Accumulators | Superseded by metrics |
+| Accumulators | Permanently out of scope — superseded by metrics |
 | Broadcast variables / distributed cache | DataSet legacy |
 | Feedback iterations | No termination guard |
 | Parallelism > 1 | Frozen design decision — all operators run with parallelism-1 semantics |
@@ -200,7 +201,6 @@ Features **planned** for future versions:
 | BroadcastProcessFunction / BroadcastState | See FUTURE.md |
 | RichSinkFunction harness | See FUTURE.md |
 | CheckpointedFunction / operator state | On demand only |
-| `createSerializer`, `getGlobalJobParameters` | Cheap fillers |
 
 ## Package overview
 

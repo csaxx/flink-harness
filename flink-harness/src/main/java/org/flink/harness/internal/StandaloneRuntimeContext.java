@@ -21,6 +21,7 @@ import org.apache.flink.api.common.state.ReducingState;
 import org.apache.flink.api.common.state.ReducingStateDescriptor;
 import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
+import org.apache.flink.api.common.serialization.SerializerConfigImpl;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.metrics.groups.OperatorMetricGroup;
@@ -34,9 +35,12 @@ import java.util.Set;
 
 /**
  * Standalone {@link RuntimeContext}: metrics via {@link StandaloneOperatorMetricGroup},
- * keyed state v1 via {@link InMemoryKeyedStateStore}. Everything else (accumulators,
- * broadcast vars, distributed cache, v2 state, serializers, ...) throws
- * {@link UnsupportedOperationException}.
+ * keyed state v1 via {@link InMemoryKeyedStateStore}, global job parameters via
+ * {@link #setGlobalJobParameters(Map)}, serializers via
+ * {@link #createSerializer(TypeInformation)}. Everything else (v2 state, broadcast
+ * vars, distributed cache, accumulators, ...) throws
+ * {@link UnsupportedOperationException}. Accumulators are permanently out of scope
+ * — use metrics ({@link #getMetricGroup()}) instead.
  */
 public class StandaloneRuntimeContext implements RuntimeContext {
 
@@ -44,6 +48,7 @@ public class StandaloneRuntimeContext implements RuntimeContext {
     private final InMemoryKeyedStateStore stateStore;
     private final JobInfo jobInfo;
     private final TaskInfo taskInfo;
+    private volatile Map<String, String> globalJobParameters = Map.of();
 
     public StandaloneRuntimeContext(String functionName) {
         this.metricGroup = new StandaloneOperatorMetricGroup(functionName);
@@ -100,6 +105,16 @@ public class StandaloneRuntimeContext implements RuntimeContext {
     /** Access to the chained state store (used by harnesses to bind keys). */
     public InMemoryKeyedStateStore stateStore() {
         return stateStore;
+    }
+
+    /** Wires global job parameters (immutable). Called once at build time. */
+    public void setGlobalJobParameters(Map<String, String> params) {
+        this.globalJobParameters = Map.copyOf(params);
+    }
+
+    @Override
+    public Map<String, String> getGlobalJobParameters() {
+        return globalJobParameters;
     }
 
     @Override
@@ -173,18 +188,17 @@ public class StandaloneRuntimeContext implements RuntimeContext {
     }
 
     // --------------------------------------------------------------------------------------------
-    // unsupported operations
+    // supported operations (formerly unsupported — now implemented with defaults)
     // --------------------------------------------------------------------------------------------
 
     @Override
     public <T> TypeSerializer<T> createSerializer(TypeInformation<T> typeInformation) {
-        throw unsupported("createSerializer");
+        return typeInformation.createSerializer(new SerializerConfigImpl());
     }
 
-    @Override
-    public Map<String, String> getGlobalJobParameters() {
-        throw unsupported("getGlobalJobParameters");
-    }
+    // --------------------------------------------------------------------------------------------
+    // unsupported / permanently-out-of-scope operations
+    // --------------------------------------------------------------------------------------------
 
     @Override
     public boolean isObjectReuseEnabled() {
@@ -203,32 +217,32 @@ public class StandaloneRuntimeContext implements RuntimeContext {
 
     @Override
     public <V, A extends Serializable> void addAccumulator(String name, Accumulator<V, A> accumulator) {
-        throw unsupported("accumulators");
+        throw permanentlyOutOfScope("accumulators");
     }
 
     @Override
     public <V, A extends Serializable> Accumulator<V, A> getAccumulator(String name) {
-        throw unsupported("accumulators");
+        throw permanentlyOutOfScope("accumulators");
     }
 
     @Override
     public IntCounter getIntCounter(String name) {
-        throw unsupported("accumulators");
+        throw permanentlyOutOfScope("accumulators");
     }
 
     @Override
     public LongCounter getLongCounter(String name) {
-        throw unsupported("accumulators");
+        throw permanentlyOutOfScope("accumulators");
     }
 
     @Override
     public DoubleCounter getDoubleCounter(String name) {
-        throw unsupported("accumulators");
+        throw permanentlyOutOfScope("accumulators");
     }
 
     @Override
     public Histogram getHistogram(String name) {
-        throw unsupported("accumulators");
+        throw permanentlyOutOfScope("accumulators");
     }
 
     @Override
@@ -268,5 +282,10 @@ public class StandaloneRuntimeContext implements RuntimeContext {
 
     private static UnsupportedOperationException unsupported(String what) {
         return new UnsupportedOperationException(what + " not supported by flink-harness standalone runtime");
+    }
+
+    private static UnsupportedOperationException permanentlyOutOfScope(String what) {
+        return new UnsupportedOperationException(
+                what + " is permanently out of scope in flink-harness — use metrics (getMetricGroup()) instead");
     }
 }
