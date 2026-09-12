@@ -1,4 +1,4 @@
-package org.flink.harness.sink;
+package org.flink.harness.graph.sink;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectWriter;

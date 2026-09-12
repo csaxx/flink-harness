@@ -8,11 +8,11 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.core.memory.DataInputDeserializer;
 import org.apache.flink.core.memory.DataOutputSerializer;
+import org.flink.harness.graph.StandaloneRuntimeContext;
 import org.junit.jupiter.api.Test;
 import org.flink.harness.WorkflowBuilder;
 import org.flink.harness.Mode;
 import org.flink.harness.StandaloneWorkflow;
-import org.flink.harness.result.WorkflowResult;
 
 import java.io.Serializable;
 import java.util.HashMap;

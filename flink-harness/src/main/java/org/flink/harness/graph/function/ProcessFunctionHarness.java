@@ -1,10 +1,10 @@
-package org.flink.harness.functions;
+package org.flink.harness.graph.function;
 
 import org.apache.flink.streaming.api.TimerService;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.OutputTag;
-import org.flink.harness.result.FunctionResult;
-import org.flink.harness.internal.RecordingCollector;
+import org.flink.harness.graph.result.FunctionResult;
+import org.flink.harness.graph.RecordingCollector;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -26,6 +26,9 @@ public final class ProcessFunctionHarness extends FunctionHarness {
     private final RecordingCollector<Object> mainCollector = new RecordingCollector<>(mainOutputs);
     private final Map<OutputTag<?>, List<Object>> sideOutputs = new LinkedHashMap<>();
 
+    /** Non-keyed functions get a query-only timer service, mirroring Flink where timers exist only
+     * on keyed streams. Note {@code currentProcessingTime()} uses the wall clock, not the workflow
+     * Clock — only the keyed service honors a custom clock. */
     @SuppressWarnings("unchecked")
     public ProcessFunctionHarness(String id, ProcessFunction<?, ?> function) {
         super(id);
@@ -79,6 +82,7 @@ public final class ProcessFunctionHarness extends FunctionHarness {
         };
     }
 
+    /** Reuses the per-node output buffers, so they must be cleared before every invocation. */
     @Override
     protected FunctionResult<?> invokeUnchecked(Object element) {
         mainOutputs.clear();

@@ -1,4 +1,4 @@
-package org.flink.harness.source;
+package org.flink.harness.graph.source;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.flink.util.Collector;

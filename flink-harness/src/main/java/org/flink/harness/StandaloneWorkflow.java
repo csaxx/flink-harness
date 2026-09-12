@@ -6,11 +6,11 @@ import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.Meter;
 import org.apache.flink.metrics.Metric;
 import org.apache.flink.util.clock.Clock;
-import org.flink.harness.functions.KeyedProcessFunctionHarness;
-import org.flink.harness.functions.NodeHarness;
+import org.flink.harness.graph.function.KeyedProcessFunctionHarness;
+import org.flink.harness.graph.function.NodeHarness;
 import org.flink.harness.metrics.StandaloneMetricGroup;
-import org.flink.harness.result.FunctionResult;
-import org.flink.harness.result.WorkflowResult;
+import org.flink.harness.graph.result.FunctionResult;
+import org.flink.harness.graph.result.WorkflowResult;
 import org.flink.harness.timer.BackgroundTimerListener;
 import org.flink.harness.timer.BackgroundTimerThread;
 import org.flink.harness.timer.ProcessingTimerMode;
@@ -84,6 +84,7 @@ public final class StandaloneWorkflow {
         this.timerService = new WorkflowTimerService(
                 this::fireProcessingTimersInternal, this::pendingTimerCountInternal);
 
+        // BACKGROUND mode gets one daemon poller for the whole workflow; other modes never start it
         if (timerMode == ProcessingTimerMode.BACKGROUND) {
             this.backgroundThread = new BackgroundTimerThread(
                     () -> backgroundFireAndRoute(),
@@ -94,6 +95,8 @@ public final class StandaloneWorkflow {
         }
     }
 
+    /** Background-thread entry point: fires due timers under the workflow lock. Returns null when
+     * nothing was due so the listener is not invoked with empty results. */
     private WorkflowResult backgroundFireAndRoute() {
         lock.lock();
         try {
@@ -113,6 +116,8 @@ public final class StandaloneWorkflow {
     // execute
     // --------------------------------------------------------------------------------------------
 
+    /** Runs {@code inputs} through the graph starting at {@code sourceId}. The whole call, including
+     * the TRANSIENT reset, happens under the workflow lock; the result is built before that reset. */
     public WorkflowResult process(List<?> inputs, String sourceId) {
         lock.lock();
         try {
@@ -131,6 +136,7 @@ public final class StandaloneWorkflow {
     }
 
     private WorkflowResult doProcess(List<?> inputs, String sourceId) {
+        // every element starts as an invocation of the source node; the source is just a node
         if (!sourceIds.contains(sourceId)) {
             throw new IllegalArgumentException("unknown source id: " + sourceId
                     + "; registered sources: " + sourceIds);
@@ -151,6 +157,8 @@ public final class StandaloneWorkflow {
     // BFS queue drainage
     // --------------------------------------------------------------------------------------------
 
+    /** FIFO breadth-first drain of the invocation queue. Only sink outputs are collected; every
+     * node's outputs are routed onward via {@link #routeResult}. */
     private WorkflowResult drainBfsQueue(Deque<Invocation> queue) {
         Map<String, List<Object>> outputsAgg = new LinkedHashMap<>();
 
@@ -174,6 +182,8 @@ public final class StandaloneWorkflow {
         return buildWorkflowResult(outputsAgg);
     }
 
+    /** OPPORTUNISTIC drain: fires due timers after every element so timers scheduled in the past
+     * (or by the element just processed) run immediately, without waiting for the queue to empty. */
     private WorkflowResult drainBfsQueueOpportunistic(Deque<Invocation> queue) {
         Map<String, List<Object>> outputsAgg = new LinkedHashMap<>();
 
@@ -195,6 +205,7 @@ public final class StandaloneWorkflow {
 
             fireDueTimers(clock.absoluteTimeMillis(), queue);
 
+            // keep draining anything the timers just produced (including further timer firings)
             while (!queue.isEmpty()) {
                 Invocation nxt = queue.poll();
                 NodeHarness n = nodes.get(nxt.functionId());
@@ -218,11 +229,14 @@ public final class StandaloneWorkflow {
         return buildWorkflowResult(outputsAgg);
     }
 
+    /** Sends a node's result along its outbound edges. A side output with no matching edge is
+     * silently dropped; main-channel outputs from non-sink nodes are only used for routing. */
     private void routeResult(String srcId, FunctionResult<?> result, Deque<Invocation> queue) {
         List<Edge> outbound = outboundEdges.getOrDefault(srcId, List.of());
         for (Edge edge : outbound) {
             List<?> transported;
             if (edge.sideChannel()) {
+                // side channel: only values the source explicitly emitted for this tag
                 transported = result.sideOutputs().get(edge.sideTag());
                 if (transported == null) {
                     continue;
@@ -240,6 +254,8 @@ public final class StandaloneWorkflow {
     // Timer management
     // --------------------------------------------------------------------------------------------
 
+    /** Explicit firing path behind {@code getTimerService().fireProcessingTimers()}; used by MANUAL
+     * mode and as a nudge in the other modes. Fires all due timers, then drains their outputs. */
     private WorkflowResult fireProcessingTimersInternal() {
         lock.lock();
         try {
@@ -268,6 +284,8 @@ public final class StandaloneWorkflow {
         }
     }
 
+    /** Polls every keyed harness for timers due at {@code now} and routes their outputs into the
+     * same queue as element outputs, so timers can trigger downstream functions and sinks. */
     private void fireDueTimers(long now, Deque<Invocation> queue) {
         for (KeyedProcessFunctionHarness harness : keyedHarnesses) {
             TimerHeap.TimerEntry entry;
@@ -296,6 +314,11 @@ public final class StandaloneWorkflow {
     // Result aggregation
     // --------------------------------------------------------------------------------------------
 
+    /** Assembles the per-node results and the aggregate metrics. Only sinks contribute outputs
+     * ({@code outputsAgg} is filled only for sink ids); a node appears iff it has sink outputs or a
+     * non-empty metrics snapshot. Side outputs are intentionally empty here — they were already
+     * routed to downstream sinks by {@link #routeResult}, so read them from the sink's outputs.
+     * Called before the TRANSIENT reset, which is why TRANSIENT results still carry their metrics. */
     private WorkflowResult buildWorkflowResult(Map<String, List<Object>> outputsAgg) {
         Map<String, FunctionResult<Object>> results = new LinkedHashMap<>();
         for (Map.Entry<String, NodeHarness> entry : nodes.entrySet()) {
@@ -314,6 +337,8 @@ public final class StandaloneWorkflow {
         return new WorkflowResult(results, aggregated);
     }
 
+    /** Cross-node flat metrics. Counters/meters/histograms are summed and gauges are last-wins in
+     * node registration order; metric names collide across nodes by design (no node namespacing). */
     private Map<String, Object> aggregateAllMetrics() {
         Map<String, Object> aggregated = new LinkedHashMap<>();
         for (NodeHarness node : nodes.values()) {
@@ -342,6 +367,9 @@ public final class StandaloneWorkflow {
     // lifecycle
     // --------------------------------------------------------------------------------------------
 
+    /** Fails every subsequent locked operation once the background timer thread has died. This is
+     * deliberate: a half-dead poller would silently stop firing timers, so the workflow is poisoned
+     * and callers must build a new one. */
     private void checkFailed() {
         if (bgFailure != null) {
             throw new RuntimeException(
@@ -354,6 +382,7 @@ public final class StandaloneWorkflow {
         }
     }
 
+    /** TRANSIENT teardown, invoked from {@code process()} finally so it also runs when a run throws. */
     private void resetTransient() {
         for (NodeHarness node : nodes.values()) {
             node.resetAll();
@@ -440,6 +469,8 @@ public final class StandaloneWorkflow {
     // lifecycle
     // --------------------------------------------------------------------------------------------
 
+    /** Idempotent teardown: stops the background poller first, then closes every node (nodes that
+     * were never opened close as no-ops). */
     public void close() {
         lock.lock();
         try {

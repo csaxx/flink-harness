@@ -112,8 +112,9 @@ new WorkflowBuilder(mode).initializeAtBuild()
 ### Type safety
 
 - `TypeInformation` hints can be provided at registration time (sources, functions, sinks).
-- `TypeExtractor.getBaseTypes()` infers types where hints are omitted.
-- Unresolved generics cause a loud failure at `build()` unless you opt out:
+- There is no `TypeExtractor` inference: an edge is "resolved" only when both endpoint
+  types are given as hints. Unresolved edges cause a loud failure at `build()` unless
+  you opt out:
   ```java
   .build(true)                                // opt out of type validation
   .build(optOutTypeValidation = true)         // same, named for clarity
@@ -205,12 +206,13 @@ Features **planned** for future versions:
 
 | Package | Audience |
 |---------|----------|
-| `org.flink.harness` | Consumer API — `WorkflowBuilder`, `StandaloneWorkflow`, `WorkflowResult`, `WorkflowNode`, `Mode`, `Edge` |
-| `org.flink.harness.functions` | Nodes — `NodeHarness` (interface), `FunctionHarness` + subtypes, `HarnessFactory` |
-| `org.flink.harness.source` | `StandaloneSource` — subclassable source base class |
-| `org.flink.harness.sink` | `StandaloneSink` — subclassable sink base class |
-| `org.flink.harness.result` | `FunctionResult`, `WorkflowResult` — output containers |
-| `org.flink.harness.internal` | Implementation internals — do not import directly |
+| `org.flink.harness` | Consumer API — `WorkflowBuilder`, `StandaloneWorkflow`, `WorkflowNode`, `Mode`, `Edge` |
+| `org.flink.harness.graph` | Implementation — `StandaloneRuntimeContext`, `RecordingCollector` |
+| `org.flink.harness.graph.function` | Nodes — `NodeHarness` (interface), `FunctionHarness` + subtypes, `HarnessFactory` |
+| `org.flink.harness.graph.result` | `FunctionResult`, `WorkflowResult` — output containers |
+| `org.flink.harness.graph.source` | `StandaloneSource`, `JsonSource` — subclassable source base classes |
+| `org.flink.harness.graph.sink` | `StandaloneSink`, `JsonSink` — subclassable sink base classes |
+| `org.flink.harness.metrics` | `StandaloneMetricGroup`, `StandaloneOperatorMetricGroup` — not API |
 | `org.flink.harness.state` | In-memory keyed state store (v1+v2), eager `StateFuture`/`StateIterator` — not API |
 | `org.flink.harness.timer` | Timer service, timer heap, processing-timer mode — consumer API |
 

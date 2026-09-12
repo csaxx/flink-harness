@@ -7,7 +7,8 @@ import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.util.Collector;
 import org.flink.harness.Edge;
-import org.flink.harness.result.FunctionResult;
+import org.flink.harness.graph.function.KeyedProcessFunctionHarness;
+import org.flink.harness.graph.result.FunctionResult;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

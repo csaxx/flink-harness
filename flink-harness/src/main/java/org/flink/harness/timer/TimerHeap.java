@@ -4,6 +4,11 @@ import java.util.HashMap;
 import java.util.Objects;
 import java.util.PriorityQueue;
 
+/**
+ * Per-keyed-node processing-time timer store. Enforces one active timer per {@code (key, timestamp)}:
+ * duplicate registrations are rejected, and deletes are lazy (the entry is flagged cancelled and
+ * discarded from the queue head on the next peek/poll). Polling is therefore always cheap.
+ */
 public final class TimerHeap {
 
     public static final class TimerEntry {
@@ -45,6 +50,7 @@ public final class TimerHeap {
         }
     }
 
+    // timestamp first, insertion sequence as tie-breaker: deterministic firing order for equal timestamps
     private final PriorityQueue<TimerEntry> queue = new PriorityQueue<>((a, b) -> {
         int cmp = Long.compare(a.timestamp, b.timestamp);
         return cmp != 0 ? cmp : Long.compare(a.seq, b.seq);
@@ -53,6 +59,7 @@ public final class TimerHeap {
     private final HashMap<TimerKey, TimerEntry> active = new HashMap<>();
     private long counter;
 
+    /** False if a timer for this exact (key, timestamp) is already active (dedup rule). */
     public boolean tryRegister(Object key, long timestamp) {
         TimerKey k = new TimerKey(key, timestamp);
         if (active.containsKey(k)) {
@@ -64,6 +71,7 @@ public final class TimerHeap {
         return true;
     }
 
+    /** Flags the entry cancelled for lazy removal; returns false (silent no-op) if not active. */
     public boolean tryDelete(Object key, long timestamp) {
         TimerKey k = new TimerKey(key, timestamp);
         TimerEntry e = active.remove(k);
@@ -80,6 +88,7 @@ public final class TimerHeap {
         return (e != null && e.timestamp <= now) ? e : null;
     }
 
+    /** Removes and returns the earliest timer due at or before {@code now}, or null. */
     public TimerEntry pollDue(long now) {
         clean();
         TimerEntry e = queue.peek();
@@ -110,6 +119,7 @@ public final class TimerHeap {
         return e != null ? e.timestamp : Long.MAX_VALUE;
     }
 
+    // drop cancelled entries sitting at the head so they cannot block due timers behind them
     private void clean() {
         while (!queue.isEmpty() && queue.peek().cancelled) {
             TimerEntry e = queue.poll();

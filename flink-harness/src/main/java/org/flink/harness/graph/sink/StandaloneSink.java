@@ -1,25 +1,27 @@
-package org.flink.harness.source;
+package org.flink.harness.graph.sink;
 
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.util.Collector;
 import org.flink.harness.Edge;
-import org.flink.harness.functions.NodeHarness;
-import org.flink.harness.internal.RecordingCollector;
+import org.flink.harness.graph.function.NodeHarness;
+import org.flink.harness.graph.RecordingCollector;
 import org.flink.harness.metrics.StandaloneOperatorMetricGroup;
-import org.flink.harness.result.FunctionResult;
+import org.flink.harness.graph.result.FunctionResult;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
 /**
- * Synthetic source node — subclasses override {@link #process(Object, Collector)}.
- * Default implementation is passthrough: emits the received element unchanged.
+ * Synthetic sink node — subclasses override {@link #accept(Object, Collector)}.
+ * Default implementation records the element as-is into the workflow result.
  *
- * @param <IN>  element type received via {@code process()}
- * @param <OUT> element type emitted downstream
+ * <p>Sinks are terminal graph nodes: elements flow in, they are recorded, and
+ * no outbound edges may attach.
+ *
+ * @param <IN> element type accepted by this sink
  */
-public class StandaloneSource<IN, OUT> implements NodeHarness {
+public class StandaloneSink<IN> implements NodeHarness {
 
     private boolean opened;
     private final StandaloneOperatorMetricGroup metricGroup =
@@ -28,12 +30,13 @@ public class StandaloneSource<IN, OUT> implements NodeHarness {
     private final RecordingCollector<Object> collector = new RecordingCollector<>(outputs);
 
     /**
-     * Override to transform or generate elements. Default: emit the input element as-is.
-     * Any element pushed via {@code out.collect()} flows downstream via outbound edges.
+     * Override to transform, filter, or record elements. Default: pass through unchanged
+     * (element is recorded in the workflow result). To filter, simply do not call
+     * {@code collected.collect()}.
      */
     @SuppressWarnings("unchecked")
-    protected void process(IN element, Collector<Object> out) throws Exception {
-        out.collect(element);
+    protected void accept(IN element, Collector<Object> collected) throws Exception {
+        collected.collect(element);
     }
 
     /** Lifecycle hook, called once on first input (or eagerly at {@code build()} if configured). */
@@ -42,15 +45,17 @@ public class StandaloneSource<IN, OUT> implements NodeHarness {
     /** Lifecycle hook, called on workflow close. */
     protected void dispose() /* intentionally empty */ {}
 
-    /** Metrics group for this source (useful for custom subclasses). */
+    /** Metrics group for this sink (useful for custom subclasses). */
     protected final MetricGroup getMetricGroup() {
         return metricGroup;
     }
 
     // ------------------------------------------------------------------------
     // NodeHarness
-    // ------------------------------------------------------------------------
+    // -------------------------------------------------------------------
 
+    /** Per-input entry: lazily init, cast to the declared input type, run {@link #accept}, and
+     * return the elements collected by the sink to the workflow result. */
     @Override
     public final FunctionResult<?> processViaEdge(Object element, Edge inboundEdge) {
         ensureOpened();
@@ -58,9 +63,9 @@ public class StandaloneSource<IN, OUT> implements NodeHarness {
         try {
             @SuppressWarnings("unchecked")
             IN typed = (IN) element;
-            process(typed, collector);
+            accept(typed, collector);
         } catch (Exception e) {
-            throw new RuntimeException("StandaloneSource process failed", e);
+            throw new RuntimeException("StandaloneSink accept failed", e);
         }
         return new FunctionResult<>(List.copyOf(outputs), Map.of(), metricGroup.snapshot());
     }
@@ -95,6 +100,7 @@ public class StandaloneSource<IN, OUT> implements NodeHarness {
 
     // ------------------------------------------------------------------------
 
+    /** Runs init() once, on first input (or eagerly when the builder requests it). */
     private void ensureOpened() {
         if (!opened) {
             init();

@@ -1,4 +1,4 @@
-package org.flink.harness.result;
+package org.flink.harness.graph.result;
 
 import org.apache.flink.util.OutputTag;
 

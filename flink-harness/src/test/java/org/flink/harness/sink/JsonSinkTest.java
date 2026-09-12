@@ -1,5 +1,6 @@
 package org.flink.harness.sink;
 
+import org.flink.harness.graph.sink.JsonSink;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;

@@ -1,6 +1,6 @@
 package org.flink.harness.timer;
 
-import org.flink.harness.result.WorkflowResult;
+import org.flink.harness.graph.result.WorkflowResult;
 
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -48,6 +48,7 @@ public final class BackgroundTimerThread implements AutoCloseable {
         }
     }
 
+    /** Wakes the poller and gives it up to 2s to exit; interrupts it if it overruns. */
     @Override
     public void close() {
         running = false;
@@ -59,9 +60,13 @@ public final class BackgroundTimerThread implements AutoCloseable {
         }
     }
 
+    /** Poll/fire/deliver loop. {@code action.fireDue()} takes the workflow lock, so timer firing
+     * never interleaves with process(). Any failure is recorded, reported once, and stops the loop;
+     * the workflow then refuses further calls (see StandaloneWorkflow.checkFailed). */
     private void runLoop() {
         while (running) {
             try {
+                // fireDue() acquires the workflow lock internally; the listener is called after it returns
                 WorkflowResult result = action.fireDue();
                 if (result != null) {
                     listener.onResult(result);
@@ -70,6 +75,7 @@ public final class BackgroundTimerThread implements AutoCloseable {
                 long waitMs = POLL_INTERVAL_MS;
                 synchronized (wakeLock) {
                     if (running) {
+                        // sleep until the next poll, or until notifyWake() releases us early
                         wakeLock.wait(waitMs);
                     }
                 }
@@ -87,7 +93,7 @@ public final class BackgroundTimerThread implements AutoCloseable {
                 break;
             }
         }
-        state.compareAndSet(State.RUNNING, State.SHUTDOWN);
-        state.compareAndSet(State.FAILED, State.FAILED);
+        state.compareAndSet(State.RUNNING, State.SHUTDOWN); // clean exit only
+        state.compareAndSet(State.FAILED, State.FAILED);   // no-op: a failure must stay FAILED
     }
 }

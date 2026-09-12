@@ -16,6 +16,8 @@ public class StandaloneOperatorMetricGroup extends StandaloneMetricGroup impleme
         super(path);
     }
 
+    /** Placeholder IO group required by OperatorMetricGroup: never updated and kept out of the
+     * parent group's metrics/children, so its counters never appear in snapshots. */
     @Override
     public OperatorIOMetricGroup getIOMetricGroup() {
         return ioMetricGroup;

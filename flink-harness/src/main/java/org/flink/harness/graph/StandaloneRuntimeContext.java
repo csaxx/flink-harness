@@ -1,4 +1,4 @@
-package org.flink.harness.internal;
+package org.flink.harness.graph;
 
 import org.apache.flink.api.common.JobInfo;
 import org.apache.flink.api.common.TaskInfo;
@@ -50,6 +50,8 @@ public class StandaloneRuntimeContext implements RuntimeContext {
     private final TaskInfo taskInfo;
     private volatile Map<String, String> globalJobParameters = Map.of();
 
+    /** One context per node: it owns that node's metric group and keyed state store. The anonymous
+     * JobInfo/TaskInfo below deliberately report a fixed single-subtask topology. */
     public StandaloneRuntimeContext(String functionName) {
         this.metricGroup = new StandaloneOperatorMetricGroup(functionName);
         this.stateStore = new InMemoryKeyedStateStore();
@@ -191,6 +193,7 @@ public class StandaloneRuntimeContext implements RuntimeContext {
     // supported operations (formerly unsupported — now implemented with defaults)
     // --------------------------------------------------------------------------------------------
 
+    /** Returns a real Flink serializer, but nothing in this runtime serializes state or records. */
     @Override
     public <T> TypeSerializer<T> createSerializer(TypeInformation<T> typeInformation) {
         return typeInformation.createSerializer(new SerializerConfigImpl());
@@ -205,6 +208,8 @@ public class StandaloneRuntimeContext implements RuntimeContext {
         return false;
     }
 
+    /** Not a real user-code classloader — there is only the harness classloader, so the release
+     * hook is a no-op (see below). */
     @Override
     public ClassLoader getUserCodeClassLoader() {
         return getClass().getClassLoader();

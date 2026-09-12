@@ -36,6 +36,7 @@ public final class StandaloneTimerService implements TimerService {
         return Long.MIN_VALUE;
     }
 
+    /** Keyed-only, matching Flink; re-registering the same (key, timestamp) is a silent no-op. */
     @Override
     public void registerProcessingTimeTimer(long time) {
         if (!keyed || !allowRegister) {
@@ -44,6 +45,7 @@ public final class StandaloneTimerService implements TimerService {
         heap.tryRegister(currentKey.get(), time);
     }
 
+    /** No event-time infrastructure exists yet (watermarks never advance) — see FUTURE.md. */
     @Override
     public void registerEventTimeTimer(long time) {
         throw new UnsupportedOperationException(

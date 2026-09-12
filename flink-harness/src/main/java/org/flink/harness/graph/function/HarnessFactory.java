@@ -1,4 +1,4 @@
-package org.flink.harness.functions;
+package org.flink.harness.graph.function;
 
 import org.apache.flink.api.common.functions.RichFilterFunction;
 import org.apache.flink.api.common.functions.RichFlatMapFunction;
@@ -16,6 +16,8 @@ public final class HarnessFactory {
         return create(id, function, SystemClock.getInstance(), Mode.CONTINUOUS);
     }
 
+    /** Single dispatch point from a user function instance to its harness. Keyed functions only
+     * accept timer registration in CONTINUOUS mode; anything unsupported fails here at build time. */
     public static FunctionHarness create(String id, Object function, Clock clock, Mode mode) {
         if (function instanceof ProcessFunction<?, ?> p) {
             return new ProcessFunctionHarness(id, p);

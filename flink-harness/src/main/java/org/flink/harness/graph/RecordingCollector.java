@@ -1,4 +1,4 @@
-package org.flink.harness.internal;
+package org.flink.harness.graph;
 
 import org.apache.flink.util.Collector;
 

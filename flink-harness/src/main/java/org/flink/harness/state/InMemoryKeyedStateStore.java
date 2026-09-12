@@ -89,6 +89,7 @@ public final class InMemoryKeyedStateStore {
             org.apache.flink.api.common.state.v2.ValueStateDescriptor<T> descriptor) {
         checkTtl(descriptor);
         descriptor.initializeSerializerUnlessSet(EXECUTION_CONFIG);
+        // v2 states share the per-key map but are namespaced so they never collide with v1 names
         return new InMemoryStateV2.ValueStateV2<>(this::backing, V2_PREFIX + descriptor.getStateId());
     }
 
@@ -122,6 +123,7 @@ public final class InMemoryKeyedStateStore {
         return new InMemoryStateV2.MapStateV2<>(this::backing, V2_PREFIX + descriptor.getStateId());
     }
 
+    // TTL is only enforced on the v2 path; a v1 descriptor with StateTtlConfig is accepted and TTL is ignored
     private static void checkTtl(org.apache.flink.api.common.state.v2.StateDescriptor<?> d) {
         if (d.getTtlConfig().isEnabled()) {
             throw new UnsupportedOperationException(
@@ -130,7 +132,9 @@ public final class InMemoryKeyedStateStore {
         }
     }
 
-    /** Backing map for the current key; must have a key bound. */
+    /** Resolves the current key's map afresh on every call — that lazy resolution is what keeps a
+     * cached state handle correctly scoped to the key currently being processed. Must have a key
+     * bound, otherwise keyed state is being used outside a keyed invocation. */
     private Map<String, Object> backing() {
         if (currentKey == null) {
             throw new IllegalStateException(
@@ -159,6 +163,7 @@ public final class InMemoryKeyedStateStore {
         @SuppressWarnings("unchecked")
         public T value() {
             Object v = backing.get().get(name);
+            // v1 fallback: unset (or stored null) reads as the descriptor's default value
             return v != null ? (T) v : descriptor.getDefaultValue();
         }
 
@@ -185,6 +190,7 @@ public final class InMemoryKeyedStateStore {
         @Override
         @SuppressWarnings("unchecked")
         public Iterable<T> get() {
+            // v1 exposes the live backing list; v2 deliberately returns an immutable copy
             return (Iterable<T>) backing.get().getOrDefault(name, List.of());
         }
 

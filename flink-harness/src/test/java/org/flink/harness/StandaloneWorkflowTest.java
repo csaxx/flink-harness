@@ -11,14 +11,13 @@ import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
-import org.flink.harness.result.WorkflowResult;
-import org.flink.harness.source.StandaloneSource;
-import org.flink.harness.sink.StandaloneSink;
+import org.flink.harness.graph.result.WorkflowResult;
+import org.flink.harness.graph.source.StandaloneSource;
+import org.flink.harness.graph.sink.StandaloneSink;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 

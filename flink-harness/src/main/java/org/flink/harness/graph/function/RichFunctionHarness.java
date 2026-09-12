@@ -1,11 +1,11 @@
-package org.flink.harness.functions;
+package org.flink.harness.graph.function;
 
 import org.apache.flink.api.common.functions.RichFunction;
 import org.apache.flink.api.common.functions.RichFilterFunction;
 import org.apache.flink.api.common.functions.RichFlatMapFunction;
 import org.apache.flink.api.common.functions.RichMapFunction;
-import org.flink.harness.result.FunctionResult;
-import org.flink.harness.internal.RecordingCollector;
+import org.flink.harness.graph.result.FunctionResult;
+import org.flink.harness.graph.RecordingCollector;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -29,6 +29,8 @@ public final class RichFunctionHarness extends FunctionHarness {
         this.kind = kind;
     }
 
+    /** MAP drops a null result; FILTER passes the element through unchanged when accepted;
+     * FLATMAP emits via the collector. Reuses one output buffer, cleared per invocation. */
     @Override
     @SuppressWarnings("unchecked")
     protected FunctionResult<?> invokeUnchecked(Object element) {

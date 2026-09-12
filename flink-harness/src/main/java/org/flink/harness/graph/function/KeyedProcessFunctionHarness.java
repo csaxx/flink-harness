@@ -1,4 +1,4 @@
-package org.flink.harness.functions;
+package org.flink.harness.graph.function;
 
 import org.apache.flink.streaming.api.TimeDomain;
 import org.apache.flink.streaming.api.TimerService;
@@ -6,8 +6,8 @@ import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.util.OutputTag;
 import org.apache.flink.util.clock.Clock;
 import org.apache.flink.util.clock.SystemClock;
-import org.flink.harness.result.FunctionResult;
-import org.flink.harness.internal.RecordingCollector;
+import org.flink.harness.graph.result.FunctionResult;
+import org.flink.harness.graph.RecordingCollector;
 import org.flink.harness.timer.StandaloneTimerService;
 import org.flink.harness.timer.TimerHeap;
 
@@ -38,6 +38,9 @@ public final class KeyedProcessFunctionHarness extends FunctionHarness {
         this(id, function, SystemClock.getInstance(), true);
     }
 
+    /** Contexts are created through the function instance because Flink declares Context and
+     * OnTimerContext as non-static inner classes (same trick as Flink's own operators). The timer
+     * service is shared by both contexts and honors {@code allowTimerRegistration}. */
     @SuppressWarnings("unchecked")
     public KeyedProcessFunctionHarness(
             String id,
@@ -97,6 +100,7 @@ public final class KeyedProcessFunctionHarness extends FunctionHarness {
                 clock, timerHeap, this::currentKey, true, allowTimerRegistration);
     }
 
+    /** Reuses the per-node output buffers, so they must be cleared before every invocation. */
     @Override
     protected FunctionResult<?> invokeUnchecked(Object element) {
         mainOutputs.clear();
@@ -109,6 +113,8 @@ public final class KeyedProcessFunctionHarness extends FunctionHarness {
         return buildResult();
     }
 
+    /** Workflow-only entry point for a due timer. Binds the timer's key and timestamp so state and
+     * {@code ctx.getCurrentKey()} are correct inside {@code onTimer}. */
     public FunctionResult<?> fireTimer(TimerHeap.TimerEntry entry) {
         mainOutputs.clear();
         sideOutputs.clear();
@@ -133,6 +139,7 @@ public final class KeyedProcessFunctionHarness extends FunctionHarness {
     @Override
     public void clearState() {
         super.clearState();
+        // timers are keyed state too: clearing state must not leave timers to fire later
         timerHeap.clear();
     }
 

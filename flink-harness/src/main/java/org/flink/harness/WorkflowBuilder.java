@@ -6,12 +6,12 @@ import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.util.OutputTag;
 import org.apache.flink.util.clock.Clock;
 import org.apache.flink.util.clock.SystemClock;
-import org.flink.harness.functions.FunctionHarness;
-import org.flink.harness.functions.HarnessFactory;
-import org.flink.harness.functions.KeyedProcessFunctionHarness;
-import org.flink.harness.functions.NodeHarness;
-import org.flink.harness.source.StandaloneSource;
-import org.flink.harness.sink.StandaloneSink;
+import org.flink.harness.graph.function.FunctionHarness;
+import org.flink.harness.graph.function.HarnessFactory;
+import org.flink.harness.graph.function.KeyedProcessFunctionHarness;
+import org.flink.harness.graph.function.NodeHarness;
+import org.flink.harness.graph.source.StandaloneSource;
+import org.flink.harness.graph.sink.StandaloneSink;
 import org.flink.harness.WorkflowNode.Kind;
 import org.flink.harness.timer.BackgroundTimerListener;
 import org.flink.harness.timer.ProcessingTimerMode;
@@ -75,6 +75,7 @@ public final class WorkflowBuilder {
         return this;
     }
 
+    /** Background mode is the only async firing path, so it is the only mode that may take a listener. */
     public WorkflowBuilder setProcessingTimerMode(
             ProcessingTimerMode mode, BackgroundTimerListener listener) {
         if (mode == null) {
@@ -211,6 +212,8 @@ public final class WorkflowBuilder {
         return this;
     }
 
+    /** Keyed main channel: the destination binds {@code keySelector(element)} as its current key
+     * before invoking, which is what makes keyed state and timers work. */
     public <IN, K> WorkflowBuilder addKeyedEdge(String src, String dst, KeySelector<IN, K> keySelector) {
         if (keySelector == null) {
             throw new IllegalArgumentException("keySelector must not be null for keyed edge");
@@ -219,6 +222,8 @@ public final class WorkflowBuilder {
         return this;
     }
 
+    /** Side channel: transports only the source's {@code ctx.output(tag)} values. An untyped tag
+     * makes the edge unresolvable, so {@code build()} fails unless validation is opted out. */
     public WorkflowBuilder addSideOutputEdge(String src, String dst, OutputTag<?> tag) {
         if (tag == null) {
             throw new IllegalArgumentException("tag must not be null for side-output edge");
@@ -227,6 +232,7 @@ public final class WorkflowBuilder {
         return this;
     }
 
+    /** Side channel whose values are additionally keyed at the destination (see addKeyedEdge). */
     public <IN, K> WorkflowBuilder addKeyedSideOutputEdge(String src, String dst,
             OutputTag<?> tag, KeySelector<IN, K> keySelector) {
         if (tag == null) {
@@ -263,6 +269,13 @@ public final class WorkflowBuilder {
         return build(false);
     }
 
+    /**
+     * Assembles and validates the graph. Anything checkable statically fails here rather than at
+     * run time: mode/timer-mode guards, topology, edge types, and keyed-edge requirements. The one
+     * deferral is opt-out type validation, which turns type errors into per-element
+     * {@code ClassCastException}s instead. Also eagerly opens nodes when requested and collects the
+     * keyed harnesses the workflow uses to fire timers.
+     */
     public StandaloneWorkflow build(boolean optOutTypeValidation) {
         if (mode == Mode.TRANSIENT && timerMode != ProcessingTimerMode.OPPORTUNISTIC) {
             throw new IllegalStateException(
@@ -301,6 +314,7 @@ public final class WorkflowBuilder {
             TypeInformation<?> srcOut = outputTypes.get(edge.src());
             TypeInformation<?> dstIn = inputTypes.get(edge.dst());
 
+            // side channel: the tag's declared type must match the destination input type
             if (edge.sideChannel()) {
                 TypeInformation<?> tagType = edge.sideTag().getTypeInfo();
                 if (tagType != null) {
@@ -315,6 +329,7 @@ public final class WorkflowBuilder {
                                     + " — provide TypeInformation hints or opt out explicitly");
                 }
             } else {
+                // main channel: known endpoint types must be equal; either side unknown = unresolved
                 boolean known = srcOut != null && dstIn != null;
                 if (known && !srcOut.equals(dstIn)) {
                     throw new IllegalStateException(
@@ -328,12 +343,14 @@ public final class WorkflowBuilder {
                 }
             }
 
+            // a keyed function is meaningless without a key selector on every inbound edge
             if (dst.requiresKeyedEdge() && !edge.keyed()) {
                 throw new IllegalStateException(
                         "KeyedProcessFunction " + edge.dst() + " received unkeyed edge from " + edge.src());
             }
         }
 
+        // eager open turns open() failures into build-time failures
         if (eagerInit) {
             for (NodeHarness node : nodes.values()) {
                 node.openOnceEager();
@@ -359,6 +376,7 @@ public final class WorkflowBuilder {
     // private helpers (unchanged)
     // --------------------------------------------------------------------------------------------
 
+    /** Sources are roots and sinks are leaves; only functions may sit in between. */
     private void validateTopology(Map<String, NodeHarness> nodes) {
         for (Edge edge : edges) {
             if (nodeKinds.get(edge.dst()) == Kind.SOURCE) {
@@ -403,6 +421,7 @@ public final class WorkflowBuilder {
         return n;
     }
 
+    /** Builds the introspection-only DAG exposed by {@code getWorkflow()}; successors come from edges. */
     private List<WorkflowNode> buildGraph(Map<String, NodeHarness> nodes) {
         Map<String, List<String>> successors = new LinkedHashMap<>();
         for (Edge edge : edges) {

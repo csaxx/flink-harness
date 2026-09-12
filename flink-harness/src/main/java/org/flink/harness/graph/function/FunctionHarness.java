@@ -1,19 +1,19 @@
-package org.flink.harness.functions;
+package org.flink.harness.graph.function;
 
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.functions.RichFunction;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.metrics.MetricGroup;
 import org.flink.harness.Edge;
-import org.flink.harness.result.FunctionResult;
+import org.flink.harness.graph.result.FunctionResult;
 import org.flink.harness.state.InMemoryKeyedStateStore;
 import org.flink.harness.metrics.StandaloneOperatorMetricGroup;
-import org.flink.harness.internal.StandaloneRuntimeContext;
+import org.flink.harness.graph.StandaloneRuntimeContext;
 
 import java.util.Map;
 
 /**
- * Base of all Flink-function harnesses. Handles open/close lifecyle, wire runtime context,
+ * Base of all Flink-function harnesses. Handles open/close lifecycle, wire runtime context,
  * key-binding. Implements {@link NodeHarness} so it participates in the workflow graph.
  */
 public abstract class FunctionHarness implements NodeHarness {
@@ -36,6 +36,8 @@ public abstract class FunctionHarness implements NodeHarness {
         return id;
     }
 
+    /** Wires the runtime context then opens the function exactly once. On the lazy path the first
+     * element's key is already bound (see {@link #processViaEdge}), so open() may use keyed state. */
     public void openOnce() {
         if (!opened) {
             RichFunction fn = unwrap();
@@ -59,6 +61,7 @@ public abstract class FunctionHarness implements NodeHarness {
         openOnce();
     }
 
+    /** Closes only nodes that were actually opened; untriggered nodes are left alone. */
     @Override
     public void close() {
         if (opened) {
@@ -70,6 +73,7 @@ public abstract class FunctionHarness implements NodeHarness {
         }
     }
 
+    /** Drops every key's state and unbinds the current key (keyed subclasses also clear timers). */
     @Override
     public void clearState() {
         stateStore.clearAll();
@@ -106,6 +110,8 @@ public abstract class FunctionHarness implements NodeHarness {
         return stateStore;
     }
 
+    /** Per-element entry point. Order matters: bind the key first so a lazy {@link #openOnce()}
+     * observes the element's key when registering state handles. */
     @Override
     public final FunctionResult<?> processViaEdge(Object element, Edge edge) {
         bindKey(element, edge);
@@ -113,6 +119,7 @@ public abstract class FunctionHarness implements NodeHarness {
         return invokeUnchecked(element);
     }
 
+    /** Confined raw cast for KeySelector invocation; failures identify the offending edge. */
     @SuppressWarnings("unchecked")
     private void bindKey(Object element, Edge edge) {
         if (edge != null && edge.keyed()) {

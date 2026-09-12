@@ -6,10 +6,10 @@ import org.flink.harness.Edge;
 import org.flink.harness.Mode;
 import org.flink.harness.StandaloneWorkflow;
 import org.flink.harness.WorkflowBuilder;
-import org.flink.harness.result.WorkflowResult;
-import org.flink.harness.functions.KeyedProcessFunctionHarness;
-import org.flink.harness.functions.ProcessFunctionHarness;
-import org.flink.harness.functions.RichFunctionHarness;
+import org.flink.harness.graph.result.WorkflowResult;
+import org.flink.harness.graph.function.KeyedProcessFunctionHarness;
+import org.flink.harness.graph.function.ProcessFunctionHarness;
+import org.flink.harness.graph.function.RichFunctionHarness;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;

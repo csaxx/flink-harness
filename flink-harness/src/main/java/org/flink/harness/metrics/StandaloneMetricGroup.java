@@ -26,6 +26,8 @@ public class StandaloneMetricGroup implements MetricGroup {
         this.path = path;
     }
 
+    /** Returns the existing metric under this name as a Counter, creating a StandaloneCounter on
+     * first use. The cast is a trap: registering a gauge under the same name throws here. */
     @Override
     public Counter counter(String name) {
         Counter existing = (Counter) metrics.get(name);
@@ -127,7 +129,8 @@ public class StandaloneMetricGroup implements MetricGroup {
         }
     }
 
-    /** Reset all counters (recursively). Gauges/Meters/Histograms are left as-is. */
+    /** Recursively zeroes only StandaloneCounter instances: custom counters registered via
+     * {@code counter(name, custom)} as well as gauges/meters/histograms are intentionally untouched. */
     public void resetCounters() {
         for (Metric metric : metrics.values()) {
             if (metric instanceof StandaloneCounter counter) {
@@ -139,6 +142,7 @@ public class StandaloneMetricGroup implements MetricGroup {
         }
     }
 
+    // snapshot values: meters and histograms collapse to their counts (no percentiles)
     private static Object extract(Metric metric) {
         if (metric instanceof Counter counter) {
             return counter.getCount();

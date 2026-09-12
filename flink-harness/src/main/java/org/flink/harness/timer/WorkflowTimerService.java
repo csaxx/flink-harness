@@ -1,7 +1,11 @@
 package org.flink.harness.timer;
 
-import org.flink.harness.result.WorkflowResult;
+import org.flink.harness.graph.result.WorkflowResult;
 
+/**
+ * Public handle for workflow-level timer control. Delegates to the owning StandaloneWorkflow's
+ * internal firing/counting, so all firing paths share the same lock and queue.
+ */
 public final class WorkflowTimerService {
 
     private final WorkflowAction fire;

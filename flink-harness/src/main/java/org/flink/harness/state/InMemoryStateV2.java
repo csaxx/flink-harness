@@ -47,6 +47,7 @@ final class InMemoryStateV2 {
 
         @Override
         public void update(T value) {
+            // v2 semantics: null means absent, so update(null) is a clear (unlike v1's descriptor default)
             if (value == null) {
                 backing.get().remove(name);
             } else {
@@ -114,6 +115,7 @@ final class InMemoryStateV2 {
         @Override
         @SuppressWarnings("unchecked")
         public void update(List<T> values) {
+            // v2 semantics: an empty or null list clears the state (v1 would keep an empty list)
             if (values == null || values.isEmpty()) {
                 backing.get().remove(name);
             } else {
@@ -190,6 +192,7 @@ final class InMemoryStateV2 {
 
         @Override
         public void put(UK key, UV value) {
+            // null value removes the entry, matching v2's "null == absent" rule
             if (value == null) {
                 map().remove(key);
             } else {
@@ -223,6 +226,7 @@ final class InMemoryStateV2 {
 
         @Override
         public Iterable<Map.Entry<UK, UV>> entries() {
+            // v2 exposes immutable snapshots, so iteration never observes concurrent mutation
             return Map.copyOf(map()).entrySet();
         }
 

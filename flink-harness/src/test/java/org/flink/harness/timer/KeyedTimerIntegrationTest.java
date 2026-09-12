@@ -11,7 +11,7 @@ import org.apache.flink.util.OutputTag;
 import org.flink.harness.Mode;
 import org.flink.harness.StandaloneWorkflow;
 import org.flink.harness.WorkflowBuilder;
-import org.flink.harness.result.WorkflowResult;
+import org.flink.harness.graph.result.WorkflowResult;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
