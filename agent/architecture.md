@@ -22,7 +22,7 @@ flink-harness (library)                 analogous Flink concept intentionally AB
 ────────────────────────                ────────────────────────────────────────────
 WorkflowBuilder                         StreamGraph / StreamExecutionEnvironment
   → StandaloneWorkflow (BFS queue)      ExecutionGraph + JobManager + TaskManager
-      → NodeHarness nodes               StreamOperator + StreamTask
+      → StreamNode nodes                StreamOperator + StreamTask
           → StandaloneRuntimeContext    RuntimeContext / StreamTask runtime
               → state / metrics / timers
 ```
@@ -49,9 +49,11 @@ are on the compile classpath but are never instantiated by this library
 Package map (working tree; do not trust older docs):
 
 ```
-org.flink.harness            WorkflowBuilder, StandaloneWorkflow, Edge, Mode, WorkflowNode
-org.flink.harness.graph      StandaloneRuntimeContext, RecordingCollector
-org.flink.harness.graph.function   NodeHarness, FunctionHarness, HarnessFactory, *Harness
+org.flink.harness            WorkflowBuilder, StandaloneWorkflow, Mode, WorkflowNode
+org.flink.harness.graph      StreamNode, DataStreamEdge, StandaloneRuntimeContext,
+                             RecordingCollector
+org.flink.harness.graph.function   AbstractFunctionHarness, SingleStreamFunctionHarness,
+                             AbstractRichFunctionHarness, HarnessFactory, *Harness
 org.flink.harness.graph.result     FunctionResult, WorkflowResult
 org.flink.harness.graph.source     StandaloneSource, JsonSource
 org.flink.harness.graph.sink       StandaloneSink, JsonSink
@@ -63,7 +65,7 @@ org.flink.harness.timer            TimerHeap, StandaloneTimerService, WorkflowTi
                                    ProcessingTimerMode
 ```
 
-`NodeHarness` and the `.state`/`.timer`/`.metrics`/`.graph` classes are public only
+`StreamNode` and the `.state`/`.timer`/`.metrics`/`.graph` classes are public only
 because Java package visibility does not cross packages. Treat only
 `org.flink.harness` root types plus the documented subclassable `StandaloneSource`
 / `StandaloneSink` / `Json*` as consumer API.
@@ -77,8 +79,8 @@ choice unless marked otherwise.)
 | Concern | Real Flink | Here | Why |
 |---|---|---|---|
 | Cluster topology | JobManager + TaskManagers + network | None; one JVM, one thread per workflow call | Offline/demo/embedded use; no distributed execution |
-| Graph construction | `StreamGraph` → `JobGraph` → `ExecutionGraph` | `WorkflowBuilder` builds a flat node map + `List<Edge>` | No scheduler to target |
-| Operator chaining | fused `StreamTask` operator chains | Every node is an independent `NodeHarness` invoked per element | Simplicity; elements are plain Java objects, no serialization at edges |
+| Graph construction | `StreamGraph` → `JobGraph` → `ExecutionGraph` | `WorkflowBuilder` builds a flat node map + `List<DataStreamEdge>` | No scheduler to target |
+| Operator chaining | fused `StreamTask` operator chains | Every node is an independent `StreamNode` invoked per element | Simplicity; elements are plain Java objects, no serialization at edges |
 | Parallelism | configurable | Always 1 (`TaskInfo.getNumberOfParallelSubtasks() == 1`) | Avoiding key redistribution/repartitioning |
 | State backend | pluggable backends + checkpointing (`HeapKeyedStateBackend`, `HashMapStateBackend`) | Plain in-memory per-key `HashMap`, no serialization, no checkpoints/savepoints | No persistence layer; state is per-process |
 | Event time / watermarks | supported | Event-time timers throw UOE; `currentWatermark()` returns `Long.MIN_VALUE` | See `timers.md`; planned in `FUTURE.md` §1 |
@@ -142,8 +144,8 @@ state accessors; see `runtime-context.md`).
   unchecked casts are allowed to live.
 - **Fail loudly at `build()`**: unresolved edge types throw unless the caller opts
   out with `build(true)`. Preserve this default.
-- **Lifecycle through `NodeHarness`**: `StandaloneWorkflow` only ever talks to
-  `NodeHarness`; sources/sinks/functions are interchangeable from its perspective.
+- **Lifecycle through `StreamNode`**: `StandaloneWorkflow` only ever talks to
+  `StreamNode`; sources/sinks/functions are interchangeable from its perspective.
 
 ## Common pitfalls / agent traps
 

@@ -2,7 +2,8 @@
 
 Run Flink streaming jobs as standalone Java calls — no Flink runtime environment, no
 MiniCluster, no test-utils. Just lightweight harnesses wrapping `ProcessFunction` /
-`KeyedProcessFunction` / `RichMapFunction` / `RichFlatMapFunction` / `RichFilterFunction`.
+`KeyedProcessFunction` / `RichMapFunction` / `RichFlatMapFunction` / `RichFilterFunction` /
+`MapFunction` / `FlatMapFunction` / `FilterFunction`.
 
 ## Why
 
@@ -33,8 +34,8 @@ import org.flink.harness.*;
 
 StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
     .addSource("in")                                          // source node — entry point for inputs
-    .registerFunction("parse", new MyParseFn())               // ProcessFunction, RichMap, etc.
-    .registerKeyedFunction("accum", new MyKeyedFn())          // KeyedProcessFunction
+    .registerFunction("parse", new MyParseFn())               // ProcessFunction, RichMap, MapFunction, etc.
+    .registerFunction("accum", new MyKeyedFn())               // KeyedProcessFunction (dedicated overload)
     .addSink("out")                                           // terminal collector
     .addSourceEdge("in", "parse")                             // source → function
     .addEdge("parse", "accum")
@@ -63,12 +64,13 @@ new WorkflowBuilder(Mode.CONTINUOUS)
     .addSource("csv", TypeInformation.of(String.class))  // with type hint
     .addSource("events", new MyCustomSource())           // custom subclass
 
-    // Functions — any Flink RichFunction subtype
-    .registerFunction("parse", new MyParseFn())                    // ProcessFunction, RichMap, etc.
+    // Functions — rich (ProcessFunction, KeyedProcessFunction, Rich*) and
+    // non-rich (MapFunction, FlatMapFunction, FilterFunction) alike
+    .registerFunction("parse", new MyParseFn())                    // any supported function type
     .registerFunction("filter", new MyFilterFn(),                 // with explicit type hints
         TypeInformation.of(String.class), TypeInformation.of(Boolean.class))
-    .registerKeyedFunction("accum", new MyKeyedFn())               // KeyedProcessFunction
-    .registerKeyedFunction("accum", new MyKeyedFn(),
+    .registerFunction("accum", new MyKeyedFn())                    // KeyedProcessFunction overload
+    .registerFunction("accum", new MyKeyedFn(),                    //   (type hints mandatory here)
         TypeInformation.of(String.class), TypeInformation.of(MyOut.class))
 
     // Sinks — default collecting or custom subclass
@@ -163,11 +165,12 @@ wf.close();  // calls close() on all nodes (idempotent, guarded by lock)
 | ProcessFunction | ✔ |
 | KeyedProcessFunction | ✔ |
 | RichMapFunction / RichFlatMapFunction / RichFilterFunction | ✔ |
+| MapFunction / FlatMapFunction / FilterFunction (non-rich) | ✔ no lifecycle, no RuntimeContext — like Flink |
 | Metrics (Counter, Gauge, Meter) via `RuntimeContext.getMetricGroup()` | ✔ |
 | Side outputs (OutputTag) — routable to any node | ✔ |
 | Keyed state v1 (ValueState, ListState, MapState, ReducingState, AggregatingState) | ✔ in-memory per-key, no serialization |
 | StandaloneSource / StandaloneSink — subclassable, default passthrough | ✔ |
-| Side-channel edges (OutputTag on `Edge`) — main/side routing via `sideTag == null` | ✔ |
+| Side-channel edges (OutputTag on `DataStreamEdge`) — main/side routing via `sideTag == null` | ✔ |
 | Timers / TimerService | ✔ three modes: OPPORTUNISTIC, MANUAL, BACKGROUND |
 | `createSerializer` | ✔ via `SerializerConfigImpl` |
 | `getGlobalJobParameters` | ✔ via `WorkflowBuilder.globalJobParameters(map)` |
@@ -206,9 +209,9 @@ Features **planned** for future versions:
 
 | Package | Audience |
 |---------|----------|
-| `org.flink.harness` | Consumer API — `WorkflowBuilder`, `StandaloneWorkflow`, `WorkflowNode`, `Mode`, `Edge` |
-| `org.flink.harness.graph` | Implementation — `StandaloneRuntimeContext`, `RecordingCollector` |
-| `org.flink.harness.graph.function` | Nodes — `NodeHarness` (interface), `FunctionHarness` + subtypes, `HarnessFactory` |
+| `org.flink.harness` | Consumer API — `WorkflowBuilder`, `StandaloneWorkflow`, `WorkflowNode`, `Mode` |
+| `org.flink.harness.graph` | Implementation — `StreamNode` (interface), `DataStreamEdge`, `StandaloneRuntimeContext`, `RecordingCollector` |
+| `org.flink.harness.graph.function` | Nodes — `AbstractFunctionHarness` + subtypes, `HarnessFactory` |
 | `org.flink.harness.graph.result` | `FunctionResult`, `WorkflowResult` — output containers |
 | `org.flink.harness.graph.source` | `StandaloneSource`, `JsonSource` — subclassable source base classes |
 | `org.flink.harness.graph.sink` | `StandaloneSink`, `JsonSink` — subclassable sink base classes |
@@ -230,22 +233,23 @@ A dedicated `DependencyTreeTest` in `flink-standalone` enforces that no banned a
 ## Architecture
 
 ```
-Your Flink functions (ProcessFunction, KeyedProcessFunction, RichMap, etc.)
+Your Flink functions (ProcessFunction, KeyedProcessFunction, RichMap, MapFunction, etc.)
         │
         ▼
 WorkflowBuilder — typed edges, key selectors, type validation
         │
         ▼
 StandaloneWorkflow — BFS execution, locking, mode management
-  ├── NodeHarness implementations
-  │     ├── FunctionHarness        → wraps RichFunction: lifecycle, RuntimeContext, metrics
-  │     │     └── AbstractRichFunctionHarness → key binding + keyed state on keyed edges
+  ├── StreamNode implementations
+  │     ├── AbstractFunctionHarness    → wraps any Flink Function: identity + metric group
+  │     │     ├── SingleStreamFunctionHarness → non-rich Map/FlatMap/Filter (no lifecycle)
+  │     │     └── AbstractRichFunctionHarness → lifecycle, RuntimeContext, key binding, keyed state
   │     │           ├── ProcessFunctionHarness
   │     │           ├── KeyedProcessFunctionHarness
   │     │           └── RichMap/FlatMap/FilterFunctionHarness
   │     ├── StandaloneSource       → synthetic source node
   │     └── StandaloneSink         → synthetic terminal node
-  ├── StandaloneRuntimeContext     → metrics group + InMemoryKeyedStateStore
+  ├── StandaloneRuntimeContext     → InMemoryKeyedStateStore (metric group lives on the harness)
   ├── RecordingCollector           → captures main + side outputs
   └── WorkflowResult               → outputs, side outputs, aggregated metrics
 ```

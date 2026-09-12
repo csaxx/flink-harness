@@ -6,8 +6,8 @@ import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.util.Collector;
-import org.flink.harness.Edge;
-import org.flink.harness.graph.function.KeyedProcessFunctionHarness;
+import org.flink.harness.graph.DataStreamEdge;
+import org.flink.harness.graph.function.rich.KeyedProcessFunctionHarness;
 import org.flink.harness.graph.result.FunctionResult;
 import org.junit.jupiter.api.Test;
 
@@ -27,7 +27,7 @@ class KeyedProcessFunctionHarnessTest {
                 return value.substring(0, 1);
             }
         };
-        Edge edge = new Edge("src", "count", selector);
+        DataStreamEdge edge = new DataStreamEdge("src", "count", selector);
 
         FunctionResult<?> r1 = harness.processElement("apple", edge);
         FunctionResult<?> r2 = harness.processElement("apricot", edge);

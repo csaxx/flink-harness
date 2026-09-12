@@ -59,6 +59,7 @@ Tests are the primary evidence for repository facts in the other `/agent` docs.
 | `KeyedProcessFunctionHarnessTest` | Per-key state isolation and `ctx.getCurrentKey()`; a keyed function invoked with no keyed edge fails loudly. |
 | `ProcessFunctionHarnessTest` | Main + side output capture, metric snapshot after invocation, `resetAll()` zeroing built-in counters. |
 | `RichFunctionHarnessesTest` | Map null-drop, flatMap collector emissions, filter pass/drop, and keyed state in a `RichMapFunction` on a keyed edge (Flink-faithful keyed-state-for-rich-functions). |
+| `SingleStreamFunctionHarnessTest` | Non-rich map (incl. null-drop), flatMap collector, filter pass/drop, error wrapping, no lifecycle for non-rich functions, plain functions end-to-end via `WorkflowBuilder`, keyed edge into a non-rich map is legal. |
 | `RuntimeContextFillersTest` | `globalJobParameters` default/immutability/constructor copy/null rejection/builder wiring/TRANSIENT survival; `createSerializer` round-trips (`String`, `Integer`, `Tuple2`); all accumulator accessors throw "permanently out of scope". |
 | `MetricGroupTest` | Counter accumulation + snapshot, nested group flattening (`errors.count`), recursive reset, gauge value exposure. |
 | `StateStoreTest` (v1) | "no bound key" failure, per-key isolation, descriptor defaults, list/map/reducing/aggregating operations, `clearCurrentKey` vs `clearAll`. |
@@ -72,17 +73,18 @@ Tests are the primary evidence for repository facts in the other `/agent` docs.
 
 | Test class | Proves |
 |---|---|
-| `DemoFunctionsTest` | Each demo function through its harness (`RichMapFunctionHarness`, `ProcessFunctionHarness`, `KeyedProcessFunctionHarness`) plus `fullWorkflowWithFanOut` end-to-end with sinks and a side output. Demonstrates constructing harnesses directly. |
+| `DemoFunctionsTest` | Each demo function through its harness (`RichMapFunctionHarness`, `ProcessFunctionHarness`, `KeyedProcessFunctionHarness`, `MapFunctionHarness`) plus `fullWorkflowWithFanOut` end-to-end with sinks and a side output. Demonstrates constructing harnesses directly. |
 | `TestSmokeTest` | The module compiles and its test harness runs. |
 
-`DemoFunctions` (parse → route → keyed accumulate / report, with `REJECTED_TAG` side
-output) is the canonical multi-stage fixture; `TestSmokeTest` is a no-op guard.
+`DemoFunctions` (parse → route → keyed accumulate / report / shout, with `REJECTED_TAG`
+side output; `shout` is a non-rich `MapFunction`) is the canonical multi-stage
+fixture; `TestSmokeTest` is a no-op guard.
 
 ### `flink-standalone` (integration)
 
 | Test class | Proves |
 |---|---|
-| `StandaloneRunnerTest` | Full runner DAG: accum/report/side outputs, per-node and aggregate metrics, CONTINUOUS accumulation, TRANSIENT reset, `resetState`, `resetStateAll`, `resetMetrics`, `getWorkflow()` kinds/successors, `getNodeIds()`, reading lines from a file. |
+| `StandaloneRunnerTest` | Full runner DAG: accum/report/shout/side outputs (shout proves a non-rich `MapFunction` in the integrated pipeline), per-node and aggregate metrics, CONTINUOUS accumulation, TRANSIENT reset, `resetState`, `resetStateAll`, `resetMetrics`, `getWorkflow()` kinds/successors, `getNodeIds()`, reading lines from a file. |
 | `DependencyTreeTest` | Production dependency tree contains no `flink-test-utils`, `flink-clients`, `flink-runtime-test` (**Windows-only**, see caveats). |
 | `StandaloneSmokeTest` | Module loads. |
 

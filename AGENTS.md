@@ -52,20 +52,23 @@ If you change any of these, update this section AND re-evaluate all code.
 | `getUserCodeClassLoader` | ✔ returns the harness classloader; `registerUserCodeClassLoaderReleaseHookIfAbsent` is a no-op |
 | StandaloneSource / StandaloneSink | ✔ concrete, subclassable, default passthrough |
 | JsonSource / JsonSink | ✔ convenience, Jackson-databind (provided scope) |
-| Side-channel edges (OutputTag on `Edge`) | ✔ main/side output routing via `sideTag == null` |
+| Side-channel edges (OutputTag on `DataStreamEdge`) | ✔ main/side output routing via `sideTag == null` |
+| Non-rich single-stream functions (`MapFunction` / `FlatMapFunction` / `FilterFunction`) | ✔ implement (no lifecycle, no `RuntimeContext`, no keyed state — like Flink) |
 
-### Harness approach (2026-09-03, restructured 2026-09-12)
+### Harness approach
 
-- **`NodeHarness`** interface consumed by `StandaloneWorkflow`. Implemented by:
-  - `FunctionHarness<F extends RichFunction>` (abstract) — wraps a constructor-injected Flink
-    function (`getFunction()`), wires `RuntimeContext`, owns open/close lifecycle and metrics.
-  - `AbstractRichFunctionHarness<F extends AbstractRichFunction>` (abstract) — adds key binding
-    and keyed-state scoping (Flink-faithful: any rich function on a keyed edge may use keyed
-    state; only non-keyed streams throw in Flink).
+- **`StreamNode`** interface (`org.flink.harness.graph`) consumed by `StandaloneWorkflow`. Implemented by:
+  - `AbstractFunctionHarness<F extends Function>` (abstract) — wraps a constructor-injected Flink
+    function (`getFunction()`), owns the node identity and per-node metric group. No lifecycle.
+  - `AbstractSingleStreamFunctionHarness<F extends Function>` (abstract) — shared output buffer and
+    result assembly for the non-rich single-stream interfaces; one concrete per type:
+    `MapFunctionHarness`, `FlatMapFunctionHarness`, `FilterFunctionHarness`.
+  - `AbstractRichFunctionHarness<F extends AbstractRichFunction>` (abstract) — adds the
+    `RuntimeContext` wiring, open/close lifecycle, key binding and keyed-state scoping
+    (Flink-faithful: any rich function on a keyed edge may use keyed state; only non-keyed
+    streams throw in Flink). Concrete: `ProcessFunctionHarness`, `KeyedProcessFunctionHarness`
+    (timers), `RichMapFunctionHarness`, `RichFlatMapFunctionHarness`, `RichFilterFunctionHarness`.
   - `StandaloneSource` / `StandaloneSink` — synthetic nodes with no-op lifecycle and own metric group.
-- Concrete harnesses, one per Flink function type: `ProcessFunctionHarness`,
-  `KeyedProcessFunctionHarness` (timers), `RichMapFunctionHarness`,
-  `RichFlatMapFunctionHarness`, `RichFilterFunctionHarness`.
 - `Context` and `OnTimerContext` are **non-static inner classes** — instantiated through the wrapped function instance (same technique as Flink operator internals).
 - `open()` is idempotent via an `opened` flag: called eagerly at `build()` under
   `initializeAtBuild()`, lazily on the first element otherwise. `KeyedProcessFunctionHarness.open()`
@@ -87,7 +90,7 @@ If you change any of these, update this section AND re-evaluate all code.
 - Opt-out edges fall back to per-element `ClassCastException` naming the edge and function ids.
 - `getWorkflow()` returns DAG tuples annotated with resolved `TypeInformation` and `WorkflowNode.Kind` (SOURCE/FUNCTION/SINK).
 
-### WorkflowBuilder surface (API, 2026-09-03, updated 2026-09-07 with timers and fillers)
+### WorkflowBuilder surface (API)
 
 ```java
 new WorkflowBuilder(mode)
@@ -99,8 +102,8 @@ new WorkflowBuilder(mode)
   .addSource("sourceId")                                 // default passthrough source
   .addSource("id", inType, outType)                      // with type hints
   .addSource("id", customSource)                          // custom subclass
-  .registerFunction("id", functionInstance)               // ProcessFunction, RichMap, etc.
-  .registerKeyedFunction("id", keyedFunctionInstance)
+  .registerFunction("id", functionInstance)               // ProcessFunction, RichMap, MapFunction, etc.
+  .registerFunction("id", keyedProcessFunctionInstance)   // overload; KeyedProcessFunction
   .addSink("sinkId")                                     // default collecting sink
   .addSink("id", customSink)                             // custom subclass
   .addSourceEdge("srcId", "dstId")                      // source → node
@@ -116,7 +119,7 @@ new WorkflowBuilder(mode)
 
 Modes: `CONTINUOUS` (metrics & state accumulate like real Flink; manual `resetState(id)` / `resetStateAll()` / `resetMetrics(id)` / `resetMetricsAll()`) and `TRANSIENT` (everything cleared after each `process()` call, including on exception via try/finally).
 
-### Processing-time timers (2026-09-07)
+### Processing-time timers
 
 | Aspect | Detail |
 |---|---|
@@ -161,13 +164,13 @@ Note: `JsonSource` and `JsonSink` declare `jackson-databind` as `provided` scope
 
 All operators run with parallelism-1 semantics (single "subtask"). No key redistribution or repartitioning between edges.
 
-### Packages (2026-09-12)
+### Packages
 
 | Package | Audience |
 |---|---|
-| `org.flink.harness` | Consumer API — `WorkflowBuilder`, `StandaloneWorkflow`, `WorkflowNode`, `Mode`, `Edge` |
-| `org.flink.harness.graph` | Implementation — `StandaloneRuntimeContext`, `RecordingCollector` |
-| `org.flink.harness.graph.function` | Nodes — `NodeHarness` (interface), `FunctionHarness` → `AbstractRichFunctionHarness` → concrete harnesses, `HarnessFactory` (public, not API) |
+| `org.flink.harness` | Consumer API — `WorkflowBuilder`, `StandaloneWorkflow`, `WorkflowNode`, `Mode` |
+| `org.flink.harness.graph` | Implementation — `StreamNode` (interface), `DataStreamEdge`, `StandaloneRuntimeContext`, `RecordingCollector` |
+| `org.flink.harness.graph.function` | Nodes — `AbstractFunctionHarness` → `AbstractSingleStreamFunctionHarness` / `AbstractRichFunctionHarness` → concrete harnesses, `HarnessFactory` (public, not API) |
 | `org.flink.harness.graph.result` | Results — `FunctionResult`, `WorkflowResult` |
 | `org.flink.harness.graph.source` | `StandaloneSource`, `JsonSource` — public API, subclassable |
 | `org.flink.harness.graph.sink` | `StandaloneSink`, `JsonSink` — public API, subclassable |
@@ -183,23 +186,28 @@ All operators run with parallelism-1 semantics (single "subtask"). No key redist
   `agent/` (below), not here.
 - **Update this file on every change** that touches design, module structure,
   version pins, or supported features.
-- Record decisions (reason + date), not prose.
-- **Comment discipline** (2026-09-12): non-trivial classes/methods carry a concise
+- Record decisions (reason), not prose.
+- **No dates in documentation** — no "added on" stamps, no dated section headers, no
+  dated decision records. Chronology belongs to git history, not to prose.
+- **Comment discipline**: non-trivial classes/methods carry a concise
   rationale comment — their role in the control flow, what they do, and any trap a
   maintainer could hit. Use javadoc on consumer-API classes and `//` one-liners
   internally; no `@param`/`@return` boilerplate. A method with several distinct
   functional blocks gets a one-line `//` summary per block. Trivial methods (getters,
   fluent setters, record accessors) stay uncommented. When you add or materially change
   such a method, add/update its comment in the same change.
-- **Naming discipline** (2026-09-12): variable names (locals, fields, parameters) are
+- **Naming discipline**: variable names (locals, fields, parameters) are
   never a single character — they indicate type and, if applicable, function.
-  `FunctionHarness h = …` becomes `FunctionHarness functionHarness`;
-  `NodeHarness src = …` becomes `NodeHarness srcHarness`. Lambda parameters and
+  `AbstractFunctionHarness h = …` becomes `AbstractFunctionHarness functionHarness`;
+  `StreamNode src = …` becomes `StreamNode srcNode`. Lambda parameters and
   catch parameters may stay idiomatic.
-- **Design guidance** (2026-09-12):
-  - Mirror the wrapped library's class shape: one harness per Flink function type, and
-    shared behavior in an intermediate matching the upstream abstraction
-    (`AbstractRichFunction` ↔ `AbstractRichFunctionHarness`) rather than the root base.
+- **Design guidance**:
+  - Mirror the wrapped library's class shape: the harness hierarchy follows Flink's
+    own (`Function` ↔ `AbstractFunctionHarness`, `AbstractRichFunction` ↔
+    `AbstractRichFunctionHarness`, `AbstractUdfStreamOperator` ↔
+    `AbstractSingleStreamFunctionHarness` with one concrete harness per non-rich single-stream
+    function type). Locate functionality where the wrapped type actually provides it:
+    lifecycle, `RuntimeContext` and keyed state exist only on the rich branch.
   - Constructor injection over post-construction wiring: everything a node needs
     (function, clock, global job parameters) arrives via the constructor — no `set*`
     calls at build time.

@@ -1,7 +1,7 @@
-package org.flink.harness.graph.function;
+package org.flink.harness.graph;
 
 import org.apache.flink.metrics.MetricGroup;
-import org.flink.harness.Edge;
+import org.flink.harness.graph.function.AbstractFunctionHarness;
 import org.flink.harness.graph.sink.StandaloneSink;
 import org.flink.harness.graph.source.StandaloneSource;
 import org.flink.harness.graph.result.FunctionResult;
@@ -10,16 +10,16 @@ import java.util.Map;
 
 /**
  * Minimal contract consumed by {@link org.flink.harness.StandaloneWorkflow}.
- * Implemented by {@link FunctionHarness} for Flink functions and by
+ * Implemented by {@link AbstractFunctionHarness} for Flink functions and by
  * {@link StandaloneSource} /
  * {@link StandaloneSink} for synthetic graph nodes.
  *
  * <p>Public because package visibility does not cross packages; not part of the
  * consumer API — implement this only through the provided abstract classes.
  */
-public interface NodeHarness {
+public interface StreamNode {
 
-    FunctionResult<?> processElement(Object element, Edge inboundEdge);
+    FunctionResult<?> processElement(Object element, DataStreamEdge inboundEdge);
 
     /** Open eagerly at build time; no-op default for synthetic nodes. */
     default void open() {}

@@ -1,4 +1,4 @@
-package org.flink.harness.graph.function;
+package org.flink.harness.graph.function.rich;
 
 import org.apache.flink.streaming.api.TimerService;
 import org.apache.flink.streaming.api.functions.ProcessFunction;

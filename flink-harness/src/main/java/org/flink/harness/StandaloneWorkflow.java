@@ -6,9 +6,10 @@ import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.Meter;
 import org.apache.flink.metrics.Metric;
 import org.apache.flink.util.clock.Clock;
-import org.flink.harness.graph.function.FunctionHarness;
-import org.flink.harness.graph.function.KeyedProcessFunctionHarness;
-import org.flink.harness.graph.function.NodeHarness;
+import org.flink.harness.graph.DataStreamEdge;
+import org.flink.harness.graph.StreamNode;
+import org.flink.harness.graph.function.AbstractFunctionHarness;
+import org.flink.harness.graph.function.rich.KeyedProcessFunctionHarness;
 import org.flink.harness.metrics.StandaloneMetricGroup;
 import org.flink.harness.graph.result.FunctionResult;
 import org.flink.harness.graph.result.WorkflowResult;
@@ -42,9 +43,9 @@ import java.util.concurrent.locks.ReentrantLock;
 public final class StandaloneWorkflow {
 
     private final ReentrantLock lock = new ReentrantLock();
-    private final Map<String, NodeHarness> nodes;
-    private final List<Edge> edges;
-    private final Map<String, List<Edge>> outboundEdges;
+    private final Map<String, StreamNode> nodes;
+    private final List<DataStreamEdge> edges;
+    private final Map<String, List<DataStreamEdge>> outboundEdges;
     private final Set<String> sourceIds;
     private final Set<String> sinkIds;
     private final Mode mode;
@@ -59,8 +60,8 @@ public final class StandaloneWorkflow {
     private volatile Throwable bgFailure;
 
     StandaloneWorkflow(
-            Map<String, NodeHarness> nodes,
-            List<Edge> edges,
+            Map<String, StreamNode> nodes,
+            List<DataStreamEdge> edges,
             Set<String> sourceIds,
             Set<String> sinkIds,
             Mode mode,
@@ -74,7 +75,7 @@ public final class StandaloneWorkflow {
         this.sourceIds = sourceIds;
         this.sinkIds = sinkIds;
         this.outboundEdges = new LinkedHashMap<>();
-        for (Edge edge : edges) {
+        for (DataStreamEdge edge : edges) {
             outboundEdges.computeIfAbsent(edge.src(), k -> new ArrayList<>()).add(edge);
         }
         this.mode = mode;
@@ -165,7 +166,7 @@ public final class StandaloneWorkflow {
 
         while (!queue.isEmpty()) {
             Invocation inv = queue.poll();
-            NodeHarness node = nodes.get(inv.functionId());
+            StreamNode node = nodes.get(inv.functionId());
             if (node == null) {
                 throw new IllegalStateException("unknown node id: " + inv.functionId());
             }
@@ -190,7 +191,7 @@ public final class StandaloneWorkflow {
 
         while (!queue.isEmpty()) {
             Invocation inv = queue.poll();
-            NodeHarness node = nodes.get(inv.functionId());
+            StreamNode node = nodes.get(inv.functionId());
             if (node == null) {
                 throw new IllegalStateException("unknown node id: " + inv.functionId());
             }
@@ -209,10 +210,10 @@ public final class StandaloneWorkflow {
             // keep draining anything the timers just produced (including further timer firings)
             while (!queue.isEmpty()) {
                 Invocation nxt = queue.poll();
-                NodeHarness nextHarness = nodes.get(nxt.functionId());
-                if (nextHarness == null) throw new IllegalStateException("unknown node id: " + nxt.functionId());
+                StreamNode nextNode = nodes.get(nxt.functionId());
+                if (nextNode == null) throw new IllegalStateException("unknown node id: " + nxt.functionId());
 
-                FunctionResult<?> nextResult = nextHarness.processElement(nxt.element(), nxt.inboundEdge());
+                FunctionResult<?> nextResult = nextNode.processElement(nxt.element(), nxt.inboundEdge());
 
                 if (sinkIds.contains(nxt.functionId())) {
                     outputsAgg.computeIfAbsent(nxt.functionId(), k -> new ArrayList<>())
@@ -233,8 +234,8 @@ public final class StandaloneWorkflow {
     /** Sends a node's result along its outbound edges. A side output with no matching edge is
      * silently dropped; main-channel outputs from non-sink nodes are only used for routing. */
     private void routeResult(String srcId, FunctionResult<?> result, Deque<Invocation> queue) {
-        List<Edge> outbound = outboundEdges.getOrDefault(srcId, List.of());
-        for (Edge edge : outbound) {
+        List<DataStreamEdge> outbound = outboundEdges.getOrDefault(srcId, List.of());
+        for (DataStreamEdge edge : outbound) {
             List<?> transported;
             if (edge.sideChannel()) {
                 // side channel: only values the source explicitly emitted for this tag
@@ -266,7 +267,7 @@ public final class StandaloneWorkflow {
             Map<String, List<Object>> outputsAgg = new LinkedHashMap<>();
             while (!queue.isEmpty()) {
                 Invocation inv = queue.poll();
-                NodeHarness node = nodes.get(inv.functionId());
+                StreamNode node = nodes.get(inv.functionId());
                 if (node == null) {
                     throw new IllegalStateException("unknown node id: " + inv.functionId());
                 }
@@ -322,7 +323,7 @@ public final class StandaloneWorkflow {
      * Called before the TRANSIENT reset, which is why TRANSIENT results still carry their metrics. */
     private WorkflowResult buildWorkflowResult(Map<String, List<Object>> outputsAgg) {
         Map<String, FunctionResult<Object>> results = new LinkedHashMap<>();
-        for (Map.Entry<String, NodeHarness> entry : nodes.entrySet()) {
+        for (Map.Entry<String, StreamNode> entry : nodes.entrySet()) {
             String id = entry.getKey();
             List<Object> outs = List.copyOf(outputsAgg.getOrDefault(id, List.of()));
             Map<String, Object> metricSnap = entry.getValue().metricsSnapshot();
@@ -342,7 +343,7 @@ public final class StandaloneWorkflow {
      * node registration order; metric names collide across nodes by design (no node namespacing). */
     private Map<String, Object> aggregateAllMetrics() {
         Map<String, Object> aggregated = new LinkedHashMap<>();
-        for (NodeHarness node : nodes.values()) {
+        for (StreamNode node : nodes.values()) {
             for (Map.Entry<String, Metric> entry : metricInstances(node).entrySet()) {
                 String name = entry.getKey();
                 Metric metric = entry.getValue();
@@ -360,7 +361,7 @@ public final class StandaloneWorkflow {
         return aggregated;
     }
 
-    private Map<String, Metric> metricInstances(NodeHarness node) {
+    private Map<String, Metric> metricInstances(StreamNode node) {
         return ((StandaloneMetricGroup) node.metricGroup()).metricInstances();
     }
 
@@ -385,7 +386,7 @@ public final class StandaloneWorkflow {
 
     /** TRANSIENT teardown, invoked from {@code process()} finally so it also runs when a run throws. */
     private void resetTransient() {
-        for (NodeHarness node : nodes.values()) {
+        for (StreamNode node : nodes.values()) {
             node.resetAll();
         }
     }
@@ -409,14 +410,14 @@ public final class StandaloneWorkflow {
     /** Returns the wrapped Flink function for function nodes, or the node itself for
      * synthetic source/sink nodes. */
     public Object getNode(String id) {
-        NodeHarness nodeHarness = nodes.get(id);
-        if (nodeHarness == null) {
+        StreamNode node = nodes.get(id);
+        if (node == null) {
             throw new IllegalStateException("unknown node id: " + id);
         }
-        if (nodeHarness instanceof FunctionHarness<?> functionHarness) {
+        if (node instanceof AbstractFunctionHarness<?> functionHarness) {
             return functionHarness.getFunction();
         }
-        return nodeHarness;
+        return node;
     }
 
     public List<WorkflowNode> getWorkflow() {
@@ -439,7 +440,7 @@ public final class StandaloneWorkflow {
     public void resetStateAll() {
         lock.lock();
         try {
-            nodes.values().forEach(NodeHarness::resetState);
+            nodes.values().forEach(StreamNode::resetState);
         } finally {
             lock.unlock();
         }
@@ -457,18 +458,18 @@ public final class StandaloneWorkflow {
     public void resetMetricsAll() {
         lock.lock();
         try {
-            nodes.values().forEach(NodeHarness::resetMetrics);
+            nodes.values().forEach(StreamNode::resetMetrics);
         } finally {
             lock.unlock();
         }
     }
 
-    private NodeHarness require(String id) {
-        NodeHarness nodeHarness = nodes.get(id);
-        if (nodeHarness == null) {
+    private StreamNode require(String id) {
+        StreamNode node = nodes.get(id);
+        if (node == null) {
             throw new IllegalStateException("unknown node id: " + id);
         }
-        return nodeHarness;
+        return node;
     }
 
     // --------------------------------------------------------------------------------------------
@@ -485,7 +486,7 @@ public final class StandaloneWorkflow {
                 if (backgroundThread != null) {
                     backgroundThread.close();
                 }
-                nodes.values().forEach(NodeHarness::close);
+                nodes.values().forEach(StreamNode::close);
             }
         } finally {
             lock.unlock();
@@ -494,5 +495,5 @@ public final class StandaloneWorkflow {
 
     // --------------------------------------------------------------------------------------------
 
-    private record Invocation(String functionId, Object element, Edge inboundEdge) {}
+    private record Invocation(String functionId, Object element, DataStreamEdge inboundEdge) {}
 }

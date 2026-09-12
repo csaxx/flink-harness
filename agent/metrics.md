@@ -16,16 +16,18 @@ rules. Metrics are the supported replacement for accumulators.
 ## Mental model
 
 ```
-FunctionHarness (per node)                      StandaloneWorkflow.buildWorkflowResult
-  └── StandaloneRuntimeContext(id)                ├─ per-node metricsSnapshot()  → FunctionResult.metrics
-        └── StandaloneOperatorMetricGroup(id)     └─ aggregateAllMetrics()       → WorkflowResult.aggregatedMetrics
-              ├── metrics: Map<String, Metric>          (all nodes, dotted names)
-              └── children: nested groups                        │
-                    └── getIOMetricGroup(): StandaloneIOMetricGroup (separate, not snapshotted)
+AbstractFunctionHarness (per node)              StandaloneWorkflow.buildWorkflowResult
+  └── StandaloneOperatorMetricGroup(id)           ├─ per-node metricsSnapshot()  → FunctionResult.metrics
+        │  (injected into the node's              └─ aggregateAllMetrics()       → WorkflowResult.aggregatedMetrics
+        │   StandaloneRuntimeContext, rich branch only)
+        ├── metrics: Map<String, Metric>          (all nodes, dotted names)
+        └── children: nested groups                        │
+              └── getIOMetricGroup(): StandaloneIOMetricGroup (separate, not snapshotted)
 ```
 
-Metric group paths are the **node id** (`StandaloneRuntimeContext(id)` →
-`StandaloneOperatorMetricGroup(id)`). Custom sources/sinks use
+Metric group paths are the **node id** (`StandaloneOperatorMetricGroup(id)`, created
+by `AbstractFunctionHarness` and injected into the `StandaloneRuntimeContext` on the
+rich branch — one group per node either way). Custom sources/sinks use
 `getClass().getSimpleName()` as their path.
 
 Files:
@@ -62,7 +64,7 @@ parent group's `metrics`/`children`, so they never appear in snapshots or aggreg
 
 ## Per-run snapshots
 
-`NodeHarness.metricsSnapshot()` returns the flattened snapshot for the node; this is
+`StreamNode.metricsSnapshot()` returns the flattened snapshot for the node; this is
 embedded in each `FunctionResult.metrics`. `buildWorkflowResult` includes a node in
 `functionResults` iff it produced sink outputs **or** its metric snapshot is non-empty.
 Snapshot keys are group-relative dotted names (e.g. `errors.count`).
@@ -87,14 +89,15 @@ These are established by `aggregatedMetricsSumCountersAcrossFunctions` and
 
 ## Reset semantics (important)
 
-- `FunctionHarness.resetMetrics()` → `StandaloneOperatorMetricGroup.resetCounters()`,
-  which zeroes only `StandaloneCounter` instances, recursively.
+- `AbstractFunctionHarness.resetMetrics()` → `StandaloneOperatorMetricGroup.resetCounters()`,
+  which zeroes only `StandaloneCounter` instances, recursively. Every function
+  harness (rich and non-rich) participates through this one implementation.
 - **Custom counters registered via `counter(name, counter)` are not reset.**
 - **Gauges, meters, and histograms are never reset.**
 - **`StandaloneSource` / `StandaloneSink` do not override `resetMetrics`/`resetState`**
-  (`NodeHarness` defaults are no-ops), so metrics and any custom state on those nodes
-  are **never reset** — including by `Mode.TRANSIENT`. Only `FunctionHarness` nodes
-  participate in reset.
+  (`StreamNode` defaults are no-ops), so metrics and any custom state on those nodes
+  are **never reset** — including by `Mode.TRANSIENT`. Only `AbstractFunctionHarness`
+  nodes participate in reset.
 - `resetMetricsAll()` calls `resetMetrics()` on every node; the same limitations apply.
 
 ## Invariants and contracts

@@ -35,7 +35,7 @@ class StandaloneWorkflowTest {
                         TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .registerFunction("shouter", new Shouter(),
                         TypeInformation.of(String.class), TypeInformation.of(String.class))
-                .registerKeyedFunction("keyedCount", new KeyedCount(),
+                .registerFunction("keyedCount", new KeyedCount(),
                         TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .addSink("shoutOut", TypeInformation.of(String.class))
                 .addSink("keyedOut", TypeInformation.of(String.class))
@@ -61,7 +61,7 @@ class StandaloneWorkflowTest {
     void transientModeClearsStateBetweenRuns() {
         StandaloneWorkflow wf = new WorkflowBuilder(Mode.TRANSIENT)
                 .addSource("in", TypeInformation.of(String.class))
-                .registerKeyedFunction("keyedCount", new KeyedCount(),
+                .registerFunction("keyedCount", new KeyedCount(),
                         TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .addSink("out")
                 .addKeyedEdge("in", "keyedCount", new FirstCharKey())
@@ -78,7 +78,7 @@ class StandaloneWorkflowTest {
     void continuousAccumulates() {
         StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .addSource("in", TypeInformation.of(String.class))
-                .registerKeyedFunction("keyedCount", new KeyedCount(),
+                .registerFunction("keyedCount", new KeyedCount(),
                         TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .addSink("out")
                 .addKeyedEdge("in", "keyedCount", new FirstCharKey())
@@ -127,7 +127,7 @@ class StandaloneWorkflowTest {
     void concurrentContinuousWorkflowAccumulatesCorrectly() throws InterruptedException {
         StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .addSource("in", TypeInformation.of(String.class))
-                .registerKeyedFunction("keyedCount", new KeyedCount(),
+                .registerFunction("keyedCount", new KeyedCount(),
                         TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .addSink("out")
                 .addKeyedEdge("in", "keyedCount", new FirstCharKey())

@@ -24,7 +24,7 @@ class KeyedV2StateIntegrationTest {
     void v2StateThroughKeyedFunction() {
         StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .addSource("in", TypeInformation.of(String.class))
-                .registerKeyedFunction("counter", new V2KeyedCount(),
+                .registerFunction("counter", new V2KeyedCount(),
                         TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .addSink("out", TypeInformation.of(String.class))
                 .addKeyedEdge("in", "counter", new FirstCharKey())
@@ -42,7 +42,7 @@ class KeyedV2StateIntegrationTest {
     void v2StateAccumulatesAcrossProcessCallsInContinuousMode() {
         StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .addSource("in", TypeInformation.of(String.class))
-                .registerKeyedFunction("counter", new V2KeyedCount(),
+                .registerFunction("counter", new V2KeyedCount(),
                         TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .addSink("out", TypeInformation.of(String.class))
                 .addKeyedEdge("in", "counter", new FirstCharKey())
@@ -59,7 +59,7 @@ class KeyedV2StateIntegrationTest {
     void v2StateClearedEachRunInTransientMode() {
         StandaloneWorkflow wf = new WorkflowBuilder(Mode.TRANSIENT)
                 .addSource("in", TypeInformation.of(String.class))
-                .registerKeyedFunction("counter", new V2KeyedCount(),
+                .registerFunction("counter", new V2KeyedCount(),
                         TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .addSink("out", TypeInformation.of(String.class))
                 .addKeyedEdge("in", "counter", new FirstCharKey())

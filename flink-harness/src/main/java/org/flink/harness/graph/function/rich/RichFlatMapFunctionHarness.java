@@ -1,4 +1,4 @@
-package org.flink.harness.graph.function;
+package org.flink.harness.graph.function.rich;
 
 import org.apache.flink.api.common.functions.RichFlatMapFunction;
 import org.flink.harness.graph.RecordingCollector;

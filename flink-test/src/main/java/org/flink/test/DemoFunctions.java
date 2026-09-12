@@ -1,5 +1,6 @@
 package org.flink.test;
 
+import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.api.common.state.ValueState;
@@ -20,12 +21,14 @@ import java.util.Objects;
  * <pre>
  *   parse (RichMapFunction) → route (ProcessFunction)  → [fan-out]
  *                                                         ├── aggregate (KeyedProcessFunction)
- *                                                         └── report (ProcessFunction)
+ *                                                         ├── report (ProcessFunction)
+ *                                                         └── shout (MapFunction, non-rich)
  * </pre>
  *
  * Activated outputs:
  *   - aggregate (main)
  *   - report   (main)
+ *   - shout    (main)
  *   - route    (side "rejected")
  * </pre>
  */
@@ -126,6 +129,15 @@ public final class DemoFunctions {
             aggregated.inc();
             out.collect(String.format(Locale.US, "customer=%s orders=%d total=%.2f",
                     ctx.getCurrentKey(), count + 1, total + value.total()));
+        }
+    }
+
+    /** Stage 3c: plain non-rich {@link MapFunction} — an uppercase announcement per order. */
+    public static final class ShoutFn implements MapFunction<ParsedOrder, String> {
+
+        @Override
+        public String map(ParsedOrder order) {
+            return "ORDER " + order.product().toUpperCase(Locale.ROOT) + " for " + order.customer();
         }
     }
 

@@ -40,7 +40,7 @@ class WorkflowBuilderValidationTest {
     void unkeyedInboundEdgeToKeyedFunctionRejected() {
         WorkflowBuilder b = new WorkflowBuilder(Mode.CONTINUOUS);
         b.registerFunction("a", new Passive());
-        b.registerKeyedFunction("b", new KeyedFn());
+        b.registerFunction("b", new KeyedFn());
         b.addEdge("a", "b");
         // unresolved types → would also fail; but keyed-check should trip with optOut=true
         assertThatThrownBy(() -> b.build(true)).isInstanceOf(IllegalStateException.class)
@@ -70,7 +70,7 @@ class WorkflowBuilderValidationTest {
     void initializeAtBuildOpensFunctionsEagerly() {
         WorkflowBuilder b = new WorkflowBuilder(Mode.CONTINUOUS);
         b.initializeAtBuild()
-         .registerKeyedFunction("k", new KeyedFn());
+         .registerFunction("k", new KeyedFn());
         // eager init sets a dummy key for the keyed function at build() time
         StandaloneWorkflow wf = b.build(true);
         assertThat(wf.getWorkflow()).hasSize(1);

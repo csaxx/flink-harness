@@ -1,4 +1,4 @@
-package org.flink.harness;
+package org.flink.harness.graph;
 
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.util.OutputTag;
@@ -7,9 +7,9 @@ import org.apache.flink.util.OutputTag;
  * Edge descriptor — source, destination, optional key selector, optional side-output tag.
  * {@code sideTag == null} means main output channel.
  */
-public record Edge(String src, String dst, KeySelector<?, ?> keySelector, OutputTag<?> sideTag) {
+public record DataStreamEdge(String src, String dst, KeySelector<?, ?> keySelector, OutputTag<?> sideTag) {
 
-    public Edge(String src, String dst, KeySelector<?, ?> keySelector) {
+    public DataStreamEdge(String src, String dst, KeySelector<?, ?> keySelector) {
         this(src, dst, keySelector, null);
     }
 

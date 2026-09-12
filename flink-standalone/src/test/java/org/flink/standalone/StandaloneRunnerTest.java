@@ -50,6 +50,19 @@ class StandaloneRunnerTest {
                 "product=pen qty=1 total=5.00");
     }
 
+    /** The shout stage is a plain non-rich MapFunction wired as its own branch. */
+    @Test
+    void runReturnsShoutOutputs() {
+        WorkflowResult result = StandaloneRunner.run(SAMPLE_LINES, Mode.CONTINUOUS);
+        List<?> shoutOut = result.outputsOf("shoutOut");
+        assertThat((List<Object>) shoutOut).containsExactly(
+                "ORDER BOOK for Alice",
+                "ORDER NOTEBOOK for Alice",
+                "ORDER ERASER for Charlie",
+                "ORDER MARKER for Bob",
+                "ORDER PEN for Alice");
+    }
+
     @Test
     void runReturnsSideOutputsInSink() {
         WorkflowResult result = StandaloneRunner.run(SAMPLE_LINES, Mode.CONTINUOUS);
@@ -159,8 +172,8 @@ class StandaloneRunnerTest {
     void getWorkflowReturnsDagWithTypesAndKinds() {
         StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS);
         var nodes = wf.getWorkflow();
-        // 8 nodes: csv(source) + parse/route/accum/report(functions) + accumOut/reportOut/rejectedOut(sinks)
-        assertThat(nodes).hasSize(8);
+        // 10 nodes: csv(source) + parse/route/accum/report/shout(functions) + accumOut/reportOut/shoutOut/rejectedOut(sinks)
+        assertThat(nodes).hasSize(10);
 
         assertThat(nodes.stream().filter(n -> n.functionId().equals("csv")).findFirst().get().kind())
                 .isEqualTo(WorkflowNode.Kind.SOURCE);
@@ -168,7 +181,9 @@ class StandaloneRunnerTest {
         assertThat(nodes.stream().filter(n -> n.functionId().equals("parse")).findFirst().get().successors())
                 .containsExactly("route");
         assertThat(nodes.stream().filter(n -> n.functionId().equals("route")).findFirst().get().successors())
-                .containsExactly("accum", "report", "rejectedOut");
+                .containsExactly("accum", "report", "shout", "rejectedOut");
+        assertThat(nodes.stream().filter(n -> n.functionId().equals("shout")).findFirst().get().successors())
+                .containsExactly("shoutOut");
         assertThat(nodes.stream().filter(n -> n.functionId().equals("accumOut")).findFirst().get().kind())
                 .isEqualTo(WorkflowNode.Kind.SINK);
     }
@@ -177,7 +192,8 @@ class StandaloneRunnerTest {
     void getNodeIdsReturnsAllIds() {
         StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS);
         assertThat(wf.getNodeIds()).containsExactlyInAnyOrder(
-                "csv", "parse", "route", "accum", "report", "accumOut", "reportOut", "rejectedOut");
+                "csv", "parse", "route", "accum", "report", "shout",
+                "accumOut", "reportOut", "shoutOut", "rejectedOut");
     }
 
     @Test

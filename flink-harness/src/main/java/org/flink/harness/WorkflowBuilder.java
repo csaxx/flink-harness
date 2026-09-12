@@ -3,13 +3,15 @@ package org.flink.harness;
 import org.apache.flink.api.common.functions.Function;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.functions.KeySelector;
+import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.util.OutputTag;
 import org.apache.flink.util.clock.Clock;
 import org.apache.flink.util.clock.SystemClock;
-import org.flink.harness.graph.function.FunctionHarness;
+import org.flink.harness.graph.DataStreamEdge;
+import org.flink.harness.graph.StreamNode;
+import org.flink.harness.graph.function.AbstractFunctionHarness;
 import org.flink.harness.graph.function.HarnessFactory;
-import org.flink.harness.graph.function.KeyedProcessFunctionHarness;
-import org.flink.harness.graph.function.NodeHarness;
+import org.flink.harness.graph.function.rich.KeyedProcessFunctionHarness;
 import org.flink.harness.graph.source.StandaloneSource;
 import org.flink.harness.graph.sink.StandaloneSink;
 import org.flink.harness.WorkflowNode.Kind;
@@ -35,7 +37,7 @@ public final class WorkflowBuilder {
     private final Map<String, StandaloneSink<?>> sinks = new LinkedHashMap<>();
     private final Map<String, TypeInformation<?>> inputTypes = new LinkedHashMap<>();
     private final Map<String, TypeInformation<?>> outputTypes = new LinkedHashMap<>();
-    private final List<Edge> edges = new ArrayList<>();
+    private final List<DataStreamEdge> edges = new ArrayList<>();
     private boolean eagerInit;
 
     private Clock clock = SystemClock.getInstance();
@@ -122,14 +124,15 @@ public final class WorkflowBuilder {
         return this;
     }
 
-    public WorkflowBuilder registerKeyedFunction(String id,
-            org.apache.flink.streaming.api.functions.KeyedProcessFunction<?, ?, ?> function) {
+    /** Keyed overloads exist only so callers never cast; overload resolution picks them whenever
+     * the static type is {@link KeyedProcessFunction}. Type hints are mandatory here because a
+     * keyed function without them is almost always a mistake. */
+    public WorkflowBuilder registerFunction(String id, KeyedProcessFunction<?, ?, ?> function) {
         registerAny(id, function, Kind.FUNCTION);
         return this;
     }
 
-    public WorkflowBuilder registerKeyedFunction(String id,
-            org.apache.flink.streaming.api.functions.KeyedProcessFunction<?, ?, ?> function,
+    public WorkflowBuilder registerFunction(String id, KeyedProcessFunction<?, ?, ?> function,
             TypeInformation<?> inputType, TypeInformation<?> outputType) {
         registerAny(id, function, Kind.FUNCTION);
         inputTypes.put(id, keyedNotNull(inputType, "input"));
@@ -208,7 +211,7 @@ public final class WorkflowBuilder {
     // --------------------------------------------------------------------------------------------
 
     public WorkflowBuilder addEdge(String src, String dst) {
-        edges.add(new Edge(src, dst, null, null));
+        edges.add(new DataStreamEdge(src, dst, null, null));
         return this;
     }
 
@@ -218,7 +221,7 @@ public final class WorkflowBuilder {
         if (keySelector == null) {
             throw new IllegalArgumentException("keySelector must not be null for keyed edge");
         }
-        edges.add(new Edge(src, dst, keySelector, null));
+        edges.add(new DataStreamEdge(src, dst, keySelector, null));
         return this;
     }
 
@@ -228,7 +231,7 @@ public final class WorkflowBuilder {
         if (tag == null) {
             throw new IllegalArgumentException("tag must not be null for side-output edge");
         }
-        edges.add(new Edge(src, dst, null, tag));
+        edges.add(new DataStreamEdge(src, dst, null, tag));
         return this;
     }
 
@@ -241,7 +244,7 @@ public final class WorkflowBuilder {
         if (keySelector == null) {
             throw new IllegalArgumentException("keySelector must not be null for keyed edge");
         }
-        edges.add(new Edge(src, dst, keySelector, tag));
+        edges.add(new DataStreamEdge(src, dst, keySelector, tag));
         return this;
     }
 
@@ -288,9 +291,9 @@ public final class WorkflowBuilder {
         }
 
         // 1. build harnesses for Flink functions
-        Map<String, NodeHarness> nodes = new LinkedHashMap<>();
+        Map<String, StreamNode> nodes = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : functions.entrySet()) {
-            FunctionHarness<?> functionHarness = HarnessFactory.create(
+            AbstractFunctionHarness<?> functionHarness = HarnessFactory.create(
                     entry.getKey(), entry.getValue(), clock, mode, globalJobParameters);
             nodes.put(entry.getKey(), functionHarness);
         }
@@ -307,9 +310,9 @@ public final class WorkflowBuilder {
         validateTopology(nodes);
 
         // 4. edge type validation
-        for (Edge edge : edges) {
-            NodeHarness srcHarness = requireNode(nodes, edge.src());
-            NodeHarness dstHarness = requireNode(nodes, edge.dst());
+        for (DataStreamEdge edge : edges) {
+            StreamNode srcNode = requireNode(nodes, edge.src());
+            StreamNode dstNode = requireNode(nodes, edge.dst());
 
             TypeInformation<?> srcOut = outputTypes.get(edge.src());
             TypeInformation<?> dstIn = inputTypes.get(edge.dst());
@@ -344,7 +347,7 @@ public final class WorkflowBuilder {
             }
 
             // a keyed function is meaningless without a key selector on every inbound edge
-            if (dstHarness.requiresKeyedEdge() && !edge.keyed()) {
+            if (dstNode.requiresKeyedEdge() && !edge.keyed()) {
                 throw new IllegalStateException(
                         "KeyedProcessFunction " + edge.dst() + " received unkeyed edge from " + edge.src());
             }
@@ -352,7 +355,7 @@ public final class WorkflowBuilder {
 
         // eager open turns open() failures into build-time failures
         if (eagerInit) {
-            for (NodeHarness node : nodes.values()) {
+            for (StreamNode node : nodes.values()) {
                 node.open();
             }
         }
@@ -377,8 +380,8 @@ public final class WorkflowBuilder {
     // --------------------------------------------------------------------------------------------
 
     /** Sources are roots and sinks are leaves; only functions may sit in between. */
-    private void validateTopology(Map<String, NodeHarness> nodes) {
-        for (Edge edge : edges) {
+    private void validateTopology(Map<String, StreamNode> nodes) {
+        for (DataStreamEdge edge : edges) {
             if (nodeKinds.get(edge.dst()) == Kind.SOURCE) {
                 throw new IllegalStateException(
                         "source node " + edge.dst() + " must not receive inbound edges (edge from " + edge.src() + ")");
@@ -413,22 +416,22 @@ public final class WorkflowBuilder {
         return value;
     }
 
-    private static NodeHarness requireNode(Map<String, NodeHarness> nodes, String id) {
-        NodeHarness nodeHarness = nodes.get(id);
-        if (nodeHarness == null) {
+    private static StreamNode requireNode(Map<String, StreamNode> nodes, String id) {
+        StreamNode node = nodes.get(id);
+        if (node == null) {
             throw new IllegalStateException("unknown node id: " + id);
         }
-        return nodeHarness;
+        return node;
     }
 
     /** Builds the introspection-only DAG exposed by {@code getWorkflow()}; successors come from edges. */
-    private List<WorkflowNode> buildGraph(Map<String, NodeHarness> nodes) {
+    private List<WorkflowNode> buildGraph(Map<String, StreamNode> nodes) {
         Map<String, List<String>> successors = new LinkedHashMap<>();
-        for (Edge edge : edges) {
+        for (DataStreamEdge edge : edges) {
             successors.computeIfAbsent(edge.src(), k -> new ArrayList<>()).add(edge.dst());
         }
         List<WorkflowNode> result = new ArrayList<>();
-        for (Map.Entry<String, NodeHarness> entry : nodes.entrySet()) {
+        for (Map.Entry<String, StreamNode> entry : nodes.entrySet()) {
             String id = entry.getKey();
             Kind kind = nodeKinds.getOrDefault(id, Kind.FUNCTION);
             String inType = typeName(inputTypes.get(id));

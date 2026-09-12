@@ -54,10 +54,19 @@ public class StandaloneRuntimeContext implements RuntimeContext {
         this(functionName, Map.of());
     }
 
-    /** One context per node: it owns that node's metric group and keyed state store. The anonymous
-     * JobInfo/TaskInfo below deliberately report a fixed single-subtask topology. */
     public StandaloneRuntimeContext(String functionName, Map<String, String> globalJobParameters) {
-        this.metricGroup = new StandaloneOperatorMetricGroup(functionName);
+        this(functionName, globalJobParameters, new StandaloneOperatorMetricGroup(functionName));
+    }
+
+    /** One context per node: it owns that node's keyed state store, while the metric group is
+     * injected by the owning harness (every node has one, even non-rich functions without a
+     * runtime context). The anonymous JobInfo/TaskInfo below deliberately report a fixed
+     * single-subtask topology. */
+    public StandaloneRuntimeContext(
+            String functionName,
+            Map<String, String> globalJobParameters,
+            StandaloneOperatorMetricGroup metricGroup) {
+        this.metricGroup = metricGroup;
         this.stateStore = new InMemoryKeyedStateStore();
         this.globalJobParameters = Map.copyOf(globalJobParameters);
         this.jobInfo = new JobInfo() {

@@ -4,7 +4,7 @@ Scope: common, often-used Flink features that can be integrated into standalone
 execution **without bloating the implementation**. Each entry: motivation, API
 sketch, implementation notes, estimated cost, test plan.
 
-## Global design directive (2026-09-03, updated 2026-09-07)
+## Global design directive
 
 | Mode | Semantics for all future features |
 |---|---|
@@ -35,6 +35,9 @@ and timestamped input API. Processing-time timers are already implemented (see A
    already use builder.clock(Clock). BACKGROUND mode with ManualClock is limited
    by real wall-clock polling (~100ms resolution). Low priority — BACKGROUND
    with SystemClock works for integration tests.
+5. **`ProcessJoinFunction` (interval joins)**: `KeyedStream.intervalJoin(…).process(…)`
+   is a timestamp-bounded two-input join; only meaningful once element timestamps
+   and watermarks exist.
 
 ---
 
@@ -56,7 +59,8 @@ and timestamped input API. Processing-time timers are already implemented (see A
 via the inner-class pattern; `Invocation` record gains `inputNum`; dispatch to
 `processElement1/2`. If timers (§1) landed first, `KeyedCoProcessFunction`
 gets timers for free via the same `StandaloneTimerService`. Side outputs and
-metrics unchanged.
+metrics unchanged. Legacy `CoMapFunction` / `CoFlatMapFunction` (two-input
+map/flatMap) fall out of the same input-index machinery; add only on demand.
 
 **Cost.** ~250 lines. **Tests.** two-input routing, per-input types, keyed
 co-function with per-input key selectors, build failure on missing/duplicate
@@ -102,7 +106,7 @@ across calls in CONTINUOUS, reset in TRANSIENT.
 
 **Motivation.** Real jobs end in sinks with `open/close`, metrics, and
 occasionally two-phase-commit-style logic. A sink harness lets existing
-production sinks run unmodified. Since v1 (2026-09-03) `StandaloneSink`
+production sinks run unmodified. Since v1, `StandaloneSink`
 provides the graph terminal; a `RichSinkFunction` adapter could plug a Flink
 sink function into the sink node.
 
@@ -135,11 +139,37 @@ documented.
 
 ---
 
+## 6. Keyed ReduceFunction / AggregateFunction
+
+**Motivation.** `KeyedStream.reduce` / `.aggregate` are the remaining single-stream
+transformations without a harness. Unlike map/flatMap/filter they are stateful:
+the *operator* (not the function) holds the running value per key — upstream does
+this inside `StreamGroupedReduce` / `StreamGroupedAggregate`. That is why they
+were deliberately not folded into `SingleStreamFunctionHarness`: a non-rich
+function must not see keyed state, but the harness holding it on the function's
+behalf is the faithful split.
+
+**API surface.** Nothing new: `registerFunction(id, reduceFn)` dispatches like
+today; the destination must be reached via a keyed edge (build-time check, same
+`requiresKeyedEdge()` mechanism as `KeyedProcessFunction`).
+
+**Implementation.** `ReduceFunctionHarness` / `AggregateFunctionHarness` —
+harness-owned per-key accumulator (a plain per-key map, seeded by the first
+element per key); emit the new running value after every element, mirroring
+upstream. `resetState()` clears the map. `AggregateFunction`: ACC state with
+`add`/`getResult`; `merge` is trivially satisfied at parallelism-1.
+
+**Cost.** ~150 lines. **Tests.** per-key running values, first-element seeding,
+CONTINUOUS accumulation across `process()` calls, TRANSIENT/`resetState`
+clearing, build failure on an unkeyed inbound edge.
+
+---
+
 ## Explicitly out of scope (bloat without payoff)
 
 | Feature | Reason |
 |---|---|
-| Windows (assigners/triggers/evictors) | A runtime of its own; users can emulate most window logic with keyed state + timers (see AGENTS.md) |
+| Windows (assigners/triggers/evictors; `WindowFunction`/`ProcessWindowFunction`, window-join `JoinFunction`/`FlatJoinFunction`/`CoGroupFunction`) | A runtime of its own; users can emulate most window logic with keyed state + timers (see AGENTS.md) |
 | Async I/O | Needs the runtime's async executor/waiter machinery |
 | FLIP-27 Source/Sink interfaces | SplitEnumerator/Reader machinery; feeding via `process()` *is* the source; §4 covers sinks |
 | State TTL (`StateTtlConfig`) | Subtle semantics; revisit after §1 (needs time infrastructure anyway) |
@@ -153,16 +183,17 @@ documented.
 1. §1 event-time / watermarks / processTimestamped (remaining future work)
 2. §2 CoProcessFunction, §3 broadcast (topology coverage)
 3. §4 sink (completeness polish)
-4. §5 CheckpointedFunction (only on demand)
+4. §6 keyed reduce/aggregate (small; on demand)
+5. §5 CheckpointedFunction (only on demand)
 
 Each step: update AGENTS.md scope table, add tests,
 `mvn -q verify`.
 
-## Implemented (formerly out of scope — 2026-09-07)
+## Implemented (formerly out of scope)
 
 ### v2 state API (`org.apache.flink.api.common.state.v2.*`)
 
-**Decision (2026-09-07).** Removed from out-of-scope and implemented in full:
+**Decision.** Removed from out-of-scope and implemented in full:
 all 5 state kinds (Value/List/Map/Reducing/Aggregating), sync + async methods,
 eager `StateFuture`/`StateIterator` (continuations run immediately on the caller
 thread), isolated v2 namespace in the same in-memory per-key store, TTL-enabled

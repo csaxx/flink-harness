@@ -20,7 +20,7 @@ alters how elements move or how results are produced, it belongs here.
 
 ```
 builder phase (single-threaded, no side effects):        run phase (under workflow lock):
-  registerFunction/KeyedFunction ─┐                        process(inputs, sourceId)
+  registerFunction ───────────────┐                        process(inputs, sourceId)
   addSource/addSink ──────────────┤                          └─ BFS Deque<Invocation>
   addEdge/addKeyedEdge/… ─────────┤                              node.processElement(elem, edge)
   build() ── validate ── open? ───┘                              → route outputs onto outbound edges
@@ -40,8 +40,8 @@ new WorkflowBuilder(Mode.CONTINUOUS | Mode.TRANSIENT)
   .setProcessingTimerMode(mode)                         // OPPORTUNISTIC default
   .setProcessingTimerMode(BACKGROUND, listener)         // listener required for BACKGROUND
   .addSource(id) / (id, ioType) / (id, inType, outType) / (id, source) / (id, source, in, out)
-  .registerFunction(id, fn) / (id, fn, inType, outType)
-  .registerKeyedFunction(id, fn) / (id, fn, inType, outType)
+  .registerFunction(id, fn) / (id, fn, inType, outType)                 // any supported Function
+  .registerFunction(id, keyedFn) / (id, keyedFn, inType, outType)       // KeyedProcessFunction overloads
   .addSink(id) / (id, inType) / (id, sink) / (id, sink, inType)
   .addEdge(src, dst)
   .addKeyedEdge(src, dst, keySelector)
@@ -67,11 +67,11 @@ Facts to preserve:
 `(functionId, kind, inputType, outputType, successors)` with
 `Kind = SOURCE | FUNCTION | SINK`. `WorkflowNode.UNKNOWN_TYPE = "<unknown>"` is used
 when no `TypeInformation` hint was supplied. The runtime dispatching is done via
-`NodeHarness`, not `WorkflowNode` (see `harnesses.md`).
+`StreamNode`, not `WorkflowNode` (see `harnesses.md`).
 
 ## Edge model
 
-`org.flink.harness.Edge` = `(src, dst, keySelector, sideTag)`:
+`org.flink.harness.graph.DataStreamEdge` = `(src, dst, keySelector, sideTag)`:
 
 - `keyed() == keySelector != null` — the destination binds the current key from the
   transported element before invoking the function.
@@ -91,7 +91,7 @@ when no `TypeInformation` hint was supplied. The runtime dispatching is done via
    `HarnessFactory.create(id, fn, clock, mode, globalJobParameters)` (params are
    constructor-injected). Unsupported function types throw here
    (`IllegalArgumentException`; see `harnesses.md`).
-4. Add sources and sinks to the node map directly (they are already `NodeHarness`).
+4. Add sources and sinks to the node map directly (they are already `StreamNode`).
 5. `validateTopology`: a SOURCE may not receive inbound edges; a SINK may not have
    outbound edges.
 6. Per-edge type + keyed validation:
@@ -168,8 +168,9 @@ not at build.
   `resetState*`, `resetMetrics*`, and `close`. Separate workflows do not contend.
 - `close()` is idempotent (guarded by a `closed` flag): stops the background timer
   thread if present, then calls `close()` on every node. Nodes opened lazily are
-  closed only if they were opened (`FunctionHarness.close` checks `opened`).
-- Direct `NodeHarness.processElement` calls bypass the lock by design; the workflow is
+  closed only if they were opened (`AbstractRichFunctionHarness.close` checks `opened`;
+  non-rich harnesses and synthetic nodes inherit no-op defaults).
+- Direct `StreamNode.processElement` calls bypass the lock by design; the workflow is
   the only supported concurrent entry point.
 - `checkFailed()` runs at the start of every locked operation and rethrows a background
   timer thread failure, permanently poisoning the workflow (see `timers.md`).
@@ -189,9 +190,9 @@ not at build.
 
 - Validation is ordered and eager at `build()`; prefer adding new checks there rather
   than at run time.
-- `StandaloneWorkflow` depends only on `NodeHarness`, never on concrete harness types
+- `StandaloneWorkflow` depends only on `StreamNode`, never on concrete harness types
   except for timer collection (`KeyedProcessFunctionHarness`).
-- Prefer adding edge kinds as `Edge` fields plus builder methods and updating
+- Prefer adding edge kinds as `DataStreamEdge` fields plus builder methods and updating
   `routeResult`; the record is the single source of routing truth.
 - Keep TRANSIENT reset centralized in `resetTransient()`.
 

@@ -2,8 +2,8 @@ package org.flink.harness.graph.source;
 
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.util.Collector;
-import org.flink.harness.Edge;
-import org.flink.harness.graph.function.NodeHarness;
+import org.flink.harness.graph.DataStreamEdge;
+import org.flink.harness.graph.StreamNode;
 import org.flink.harness.graph.RecordingCollector;
 import org.flink.harness.metrics.StandaloneOperatorMetricGroup;
 import org.flink.harness.graph.result.FunctionResult;
@@ -19,7 +19,7 @@ import java.util.Map;
  * @param <IN>  element type received via {@code process()}
  * @param <OUT> element type emitted downstream
  */
-public class StandaloneSource<IN, OUT> implements NodeHarness {
+public class StandaloneSource<IN, OUT> implements StreamNode {
 
     private boolean opened;
     private final StandaloneOperatorMetricGroup metricGroup =
@@ -48,13 +48,13 @@ public class StandaloneSource<IN, OUT> implements NodeHarness {
     }
 
     // ------------------------------------------------------------------------
-    // NodeHarness
+    // StreamNode
     // ------------------------------------------------------------------------
 
     /** Per-input entry: lazily init, cast to the declared input type, run {@link #process}, and
      * return the emitted elements to the workflow. */
     @Override
-    public final FunctionResult<?> processElement(Object element, Edge inboundEdge) {
+    public final FunctionResult<?> processElement(Object element, DataStreamEdge inboundEdge) {
         open();
         outputs.clear();
         try {

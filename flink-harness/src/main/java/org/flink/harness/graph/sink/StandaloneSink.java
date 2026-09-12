@@ -2,8 +2,8 @@ package org.flink.harness.graph.sink;
 
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.util.Collector;
-import org.flink.harness.Edge;
-import org.flink.harness.graph.function.NodeHarness;
+import org.flink.harness.graph.DataStreamEdge;
+import org.flink.harness.graph.StreamNode;
 import org.flink.harness.graph.RecordingCollector;
 import org.flink.harness.metrics.StandaloneOperatorMetricGroup;
 import org.flink.harness.graph.result.FunctionResult;
@@ -21,7 +21,7 @@ import java.util.Map;
  *
  * @param <IN> element type accepted by this sink
  */
-public class StandaloneSink<IN> implements NodeHarness {
+public class StandaloneSink<IN> implements StreamNode {
 
     private boolean opened;
     private final StandaloneOperatorMetricGroup metricGroup =
@@ -51,13 +51,13 @@ public class StandaloneSink<IN> implements NodeHarness {
     }
 
     // ------------------------------------------------------------------------
-    // NodeHarness
+    // StreamNode
     // -------------------------------------------------------------------
 
     /** Per-input entry: lazily init, cast to the declared input type, run {@link #accept}, and
      * return the elements collected by the sink to the workflow result. */
     @Override
-    public final FunctionResult<?> processElement(Object element, Edge inboundEdge) {
+    public final FunctionResult<?> processElement(Object element, DataStreamEdge inboundEdge) {
         open();
         outputs.clear();
         try {

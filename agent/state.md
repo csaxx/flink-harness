@@ -101,9 +101,9 @@ v2 intentionally has **stronger null/copy semantics** than v1:
 
 ## Lifecycle integration
 
-- `FunctionHarness.open()` may register state handles; lazy open binds the first key
-  first, eager open (`initializeAtBuild()`) binds a dummy placeholder key so handle
-  registration cannot fail (`harnesses.md`).
+- `AbstractRichFunctionHarness.open()` may register state handles; lazy open binds
+  the first key first, eager open (`initializeAtBuild()`) binds a dummy placeholder
+  key so handle registration cannot fail (`harnesses.md`).
 - `resetState(nodeId)` / `resetStateAll()` call `InMemoryKeyedStateStore.clearAll()`
   and null the current key. For a `KeyedProcessFunctionHarness`, `resetState` also
   clears the timer heap (`timers.md`).

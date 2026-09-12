@@ -32,8 +32,9 @@ RichFunction.getRuntimeContext()
 
 | Member | Behavior |
 |---|---|
-| `StandaloneRuntimeContext(String functionName)` | Creates the operator metric group and state store; `functionName` is used as job/task name; empty global job parameters. |
-| `StandaloneRuntimeContext(String, Map<String,String>)` | Also stores the global job parameters as an immutable `Map.copyOf`; null → `NullPointerException` (from `Map.copyOf`). Used by the harness constructors. |
+| `StandaloneRuntimeContext(String functionName)` | Creates a fresh operator metric group and the state store; `functionName` is used as job/task name; empty global job parameters. |
+| `StandaloneRuntimeContext(String, Map<String,String>)` | Also stores the global job parameters as an immutable `Map.copyOf`; null → `NullPointerException` (from `Map.copyOf`). Creates a fresh metric group. |
+| `StandaloneRuntimeContext(String, Map<String,String>, StandaloneOperatorMetricGroup)` | The harness wiring: the metric group is injected from the owning `AbstractFunctionHarness` (every node owns exactly one group, even non-rich functions without a context). |
 | `getMetricGroup()` | Returns `StandaloneOperatorMetricGroup` (an `OperatorMetricGroup`). |
 | `stateStore()` | Internal accessor used by harnesses to bind keys (not Flink API). |
 | `getGlobalJobParameters()` | Defaults to `Map.of()`; immutable. |

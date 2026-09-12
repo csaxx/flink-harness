@@ -8,10 +8,10 @@ import org.apache.flink.api.common.state.ValueState;
 import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.util.Collector;
-import org.flink.harness.Edge;
-import org.flink.harness.graph.function.RichFilterFunctionHarness;
-import org.flink.harness.graph.function.RichFlatMapFunctionHarness;
-import org.flink.harness.graph.function.RichMapFunctionHarness;
+import org.flink.harness.graph.DataStreamEdge;
+import org.flink.harness.graph.function.rich.RichFilterFunctionHarness;
+import org.flink.harness.graph.function.rich.RichFlatMapFunctionHarness;
+import org.flink.harness.graph.function.rich.RichMapFunctionHarness;
 import org.flink.harness.graph.result.FunctionResult;
 import org.junit.jupiter.api.Test;
 
@@ -75,7 +75,7 @@ class RichFunctionHarnessesTest {
     void mapUsesKeyedStateOnKeyedEdge() {
         RichMapFunctionHarness harness = new RichMapFunctionHarness("map", new PerKeyCountingMap());
         KeySelector<String, String> firstChar = value -> value.substring(0, 1);
-        Edge edge = new Edge("src", "map", firstChar);
+        DataStreamEdge edge = new DataStreamEdge("src", "map", firstChar);
 
         FunctionResult<?> a1 = harness.processElement("apple", edge);
         FunctionResult<?> a2 = harness.processElement("apricot", edge);

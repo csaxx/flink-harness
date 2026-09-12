@@ -32,7 +32,7 @@ class KeyedTimerIntegrationTest {
     void processingTimerFiresAfterElement() {
         StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .addSource("in", TypeInformation.of(String.class))
-                .registerKeyedFunction("proc", new TimerRegisteringFunction(50),
+                .registerFunction("proc", new TimerRegisteringFunction(50),
                         TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .addSink("out")
                 .addKeyedEdge("in", "proc", new FirstCharKey())
@@ -49,7 +49,7 @@ class KeyedTimerIntegrationTest {
     void processingTimerDoesNotFireBeforeTimestamp() {
         StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .addSource("in", TypeInformation.of(String.class))
-                .registerKeyedFunction("proc", new TimerRegisteringFunction(System.currentTimeMillis() + 99999),
+                .registerFunction("proc", new TimerRegisteringFunction(System.currentTimeMillis() + 99999),
                         TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .addSink("out")
                 .addKeyedEdge("in", "proc", new FirstCharKey())
@@ -65,7 +65,7 @@ class KeyedTimerIntegrationTest {
     void onTimerCanProduceSideOutputsAndMainOutputs() {
         StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .addSource("in", TypeInformation.of(String.class))
-                .registerKeyedFunction("proc", new KeyedProcessFunction<String, String, String>() {
+                .registerFunction("proc", new KeyedProcessFunction<String, String, String>() {
                     @Override
                     public void processElement(String value, Context ctx, Collector<String> out) {
                         ctx.timerService().registerProcessingTimeTimer(1);
@@ -95,7 +95,7 @@ class KeyedTimerIntegrationTest {
     void timerCorrectlyBindsKeyAndState() {
 StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .addSource("in", TypeInformation.of(String.class))
-                .registerKeyedFunction("proc", new CountingTimerFunction(),
+                .registerFunction("proc", new CountingTimerFunction(),
                         TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .addSink("out")
                 .addKeyedEdge("in", "proc", new FirstCharKey())
@@ -115,7 +115,7 @@ StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
     void timerCanRegisterAnotherTimerFromOnTimer() {
         StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .addSource("in", TypeInformation.of(String.class))
-                .registerKeyedFunction("proc", new KeyedProcessFunction<String, String, String>() {
+                .registerFunction("proc", new KeyedProcessFunction<String, String, String>() {
                     private int count = 0;
 
                     @Override
@@ -153,7 +153,7 @@ StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
         StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .setProcessingTimerMode(ProcessingTimerMode.MANUAL)
                 .addSource("in", TypeInformation.of(String.class))
-                .registerKeyedFunction("proc", new TimerRegisteringFunction(500),
+                .registerFunction("proc", new TimerRegisteringFunction(500),
                         TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .addSink("out")
                 .addKeyedEdge("in", "proc", new FirstCharKey())
@@ -176,7 +176,7 @@ StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
         StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .setProcessingTimerMode(ProcessingTimerMode.MANUAL)
                 .addSource("in", TypeInformation.of(String.class))
-                .registerKeyedFunction("proc", new TimerRegisteringFunction(farFuture),
+                .registerFunction("proc", new TimerRegisteringFunction(farFuture),
                         TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .addSink("out")
                 .addKeyedEdge("in", "proc", new FirstCharKey())
@@ -215,7 +215,7 @@ StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                             }
                         })
                 .addSource("in", TypeInformation.of(String.class))
-                .registerKeyedFunction("proc", new TimerRegisteringFunction(fireAt),
+                .registerFunction("proc", new TimerRegisteringFunction(fireAt),
                         TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .addSink("out")
                 .addKeyedEdge("in", "proc", new FirstCharKey())
@@ -248,7 +248,7 @@ StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                             }
                         })
                 .addSource("in", TypeInformation.of(String.class))
-                .registerKeyedFunction("failProc", new FailingOnTimerFunction(50),
+                .registerFunction("failProc", new FailingOnTimerFunction(50),
                         TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .addSink("out")
                 .addKeyedEdge("in", "failProc", new FirstCharKey())
@@ -270,7 +270,7 @@ StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
     void transientModeRegisterProcessingTimeTimerThrowsUoe() {
         StandaloneWorkflow wf = new WorkflowBuilder(Mode.TRANSIENT)
                 .addSource("in", TypeInformation.of(String.class))
-                .registerKeyedFunction("proc", new TimerRegisteringFunction(50),
+                .registerFunction("proc", new TimerRegisteringFunction(50),
                         TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .addSink("out")
                 .addKeyedEdge("in", "proc", new FirstCharKey())
@@ -289,7 +289,7 @@ StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
         assertThatThrownBy(() -> new WorkflowBuilder(Mode.TRANSIENT)
                 .setProcessingTimerMode(ProcessingTimerMode.MANUAL)
                 .addSource("in")
-                .registerKeyedFunction("proc", new TimerRegisteringFunction(50))
+                .registerFunction("proc", new TimerRegisteringFunction(50))
                 .addSink("out")
                 .addKeyedEdge("in", "proc", new FirstCharKey())
                 .addEdge("proc", "out")
@@ -307,7 +307,7 @@ StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
         StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .setProcessingTimerMode(ProcessingTimerMode.MANUAL)
                 .addSource("in", TypeInformation.of(String.class))
-                .registerKeyedFunction("proc", new KeyedProcessFunction<String, String, String>() {
+                .registerFunction("proc", new KeyedProcessFunction<String, String, String>() {
                     @Override
                     public void processElement(String value, Context ctx, Collector<String> out) {
                         ctx.timerService().registerProcessingTimeTimer(100);
@@ -338,7 +338,7 @@ StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
         StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .setProcessingTimerMode(ProcessingTimerMode.MANUAL)
                 .addSource("in", TypeInformation.of(String.class))
-                .registerKeyedFunction("proc", new TimerRegisteringFunction(100),
+                .registerFunction("proc", new TimerRegisteringFunction(100),
                         TypeInformation.of(String.class), TypeInformation.of(String.class))
                 .addSink("out")
                 .addKeyedEdge("in", "proc", new FirstCharKey())

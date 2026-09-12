@@ -2,14 +2,15 @@ package org.flink.test;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.functions.KeySelector;
-import org.flink.harness.Edge;
+import org.flink.harness.graph.DataStreamEdge;
 import org.flink.harness.Mode;
 import org.flink.harness.StandaloneWorkflow;
 import org.flink.harness.WorkflowBuilder;
 import org.flink.harness.graph.result.WorkflowResult;
-import org.flink.harness.graph.function.KeyedProcessFunctionHarness;
-import org.flink.harness.graph.function.ProcessFunctionHarness;
-import org.flink.harness.graph.function.RichMapFunctionHarness;
+import org.flink.harness.graph.function.rich.KeyedProcessFunctionHarness;
+import org.flink.harness.graph.function.single.MapFunctionHarness;
+import org.flink.harness.graph.function.rich.ProcessFunctionHarness;
+import org.flink.harness.graph.function.rich.RichMapFunctionHarness;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -61,7 +62,7 @@ class DemoFunctionsTest {
     void accumulateFnAccumulatesPerCustomer() {
         KeyedProcessFunctionHarness harness = new KeyedProcessFunctionHarness("accum", new DemoFunctions.AccumulateFn());
         KeySelector<DemoFunctions.ParsedOrder, String> byCustomer = DemoFunctions.ParsedOrder::customer;
-        Edge edge = new Edge("src", "accum", byCustomer);
+        DataStreamEdge edge = new DataStreamEdge("src", "accum", byCustomer);
 
         DemoFunctions.ParsedOrder a = new DemoFunctions.ParsedOrder("c1", "p1", 2, 10.0);
         DemoFunctions.ParsedOrder b = new DemoFunctions.ParsedOrder("c1", "p2", 1, 20.0);
@@ -85,6 +86,16 @@ class DemoFunctionsTest {
         assertThat((List<Object>) result.outputs()).containsExactly("product=gadget qty=3 total=13.50");
     }
 
+    /** The demo's non-rich function runs through the plain MapFunctionHarness. */
+    @Test
+    @SuppressWarnings("unchecked")
+    void shoutFnAnnouncesOrders() {
+        MapFunctionHarness harness = new MapFunctionHarness("shout", new DemoFunctions.ShoutFn());
+        DemoFunctions.ParsedOrder order = new DemoFunctions.ParsedOrder("c1", "gadget", 3, 4.5);
+        var result = harness.processElement(order, null);
+        assertThat((List<Object>) result.outputs()).containsExactly("ORDER GADGET for c1");
+    }
+
     // --------------------------------------------------------------------------------------------
     // integration test: full workflow with sources and sinks
     // --------------------------------------------------------------------------------------------
@@ -96,17 +107,21 @@ class DemoFunctionsTest {
                 .addSource("csv", TypeInformation.of(String.class))
                 .registerFunction("parse", new DemoFunctions.ParseFn())
                 .registerFunction("route", new DemoFunctions.RouteFn())
-                .registerKeyedFunction("accum", new DemoFunctions.AccumulateFn())
+                .registerFunction("accum", new DemoFunctions.AccumulateFn())
                 .registerFunction("report", new DemoFunctions.ReportFn())
+                .registerFunction("shout", new DemoFunctions.ShoutFn())
                 .addSink("accumOut")
                 .addSink("reportOut")
+                .addSink("shoutOut")
                 .addSink("rejectedOut")
                 .addSourceEdge("csv", "parse")
                 .addEdge("parse", "route")
                 .addKeyedEdge("route", "accum", DemoFunctions.ParsedOrder::customer)
                 .addEdge("route", "report")
+                .addEdge("route", "shout")
                 .addEdge("accum", "accumOut")
                 .addEdge("report", "reportOut")
+                .addEdge("shout", "shoutOut")
                 .addSinkEdge("route", "rejectedOut", DemoFunctions.REJECTED_TAG)
                 .build(true);
 
@@ -125,6 +140,12 @@ class DemoFunctionsTest {
         assertThat((List<Object>) reportOut).containsExactly(
                 "product=book qty=2 total=25.00",
                 "product=notebook qty=1 total=8.00");
+
+        // non-rich map branch announces the good orders
+        List<?> shoutOut = result.outputsOf("shoutOut");
+        assertThat((List<Object>) shoutOut).containsExactly(
+                "ORDER BOOK for Alice",
+                "ORDER NOTEBOOK for Alice");
 
         // rejected side output routed to its own sink
         List<?> rejected = result.outputsOf("rejectedOut");
