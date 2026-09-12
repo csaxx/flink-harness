@@ -19,20 +19,20 @@ import java.util.Map;
  */
 public interface NodeHarness {
 
-    FunctionResult<?> processViaEdge(Object element, Edge inboundEdge);
+    FunctionResult<?> processElement(Object element, Edge inboundEdge);
 
     /** Open eagerly at build time; no-op default for synthetic nodes. */
-    default void openOnceEager() {}
+    default void open() {}
 
     default void close() {}
 
-    default void clearState() {}
+    default void resetState() {}
 
-    default void clearMetrics() {}
+    default void resetMetrics() {}
 
     default void resetAll() {
-        clearState();
-        clearMetrics();
+        resetState();
+        resetMetrics();
     }
 
     default boolean requiresKeyedEdge() {
@@ -41,7 +41,5 @@ public interface NodeHarness {
 
     Map<String, Object> metricsSnapshot();
 
-    MetricGroup unwrapMetricGroup();
-
-    Object unwrap();
+    MetricGroup metricGroup();
 }

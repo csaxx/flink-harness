@@ -87,15 +87,15 @@ These are established by `aggregatedMetricsSumCountersAcrossFunctions` and
 
 ## Reset semantics (important)
 
-- `FunctionHarness.clearMetrics()` → `StandaloneOperatorMetricGroup.resetCounters()`,
+- `FunctionHarness.resetMetrics()` → `StandaloneOperatorMetricGroup.resetCounters()`,
   which zeroes only `StandaloneCounter` instances, recursively.
 - **Custom counters registered via `counter(name, counter)` are not reset.**
 - **Gauges, meters, and histograms are never reset.**
-- **`StandaloneSource` / `StandaloneSink` do not override `clearMetrics`/`clearState`**
+- **`StandaloneSource` / `StandaloneSink` do not override `resetMetrics`/`resetState`**
   (`NodeHarness` defaults are no-ops), so metrics and any custom state on those nodes
   are **never reset** — including by `Mode.TRANSIENT`. Only `FunctionHarness` nodes
   participate in reset.
-- `clearMetricsAll()` calls `clearMetrics()` on every node; the same limitations apply.
+- `resetMetricsAll()` calls `resetMetrics()` on every node; the same limitations apply.
 
 ## Invariants and contracts
 
@@ -114,7 +114,7 @@ These are established by `aggregatedMetricsSumCountersAcrossFunctions` and
 - Use dotted child groups for namespacing; they flatten automatically.
 - To make a metric resettable in TRANSIENT mode, use the built-in `counter(name)`
   factory, not a custom counter.
-- Custom nodes that need resettable metrics must override `clearMetrics`/`clearState`.
+- Custom nodes that need resettable metrics must override `resetMetrics`/`resetState`.
 
 ## Deliberate differences from Flink
 
@@ -146,7 +146,7 @@ These are established by `aggregatedMetricsSumCountersAcrossFunctions` and
   last-wins; `customSourceMetricsAvailable` / `sinkMetricsAvailable` prove custom
   node metrics reach `FunctionResult.metrics`.
 - `flink-standalone/.../StandaloneRunnerTest` — metrics across a realistic DAG and
-  `clearMetrics` for a function node.
+  `resetMetrics` for a function node.
 
 There is **no test** for custom-counter non-reset, source/sink non-reset in TRANSIENT,
 IO group non-snapshotting, or gauge-name collisions. Add tests if you change these.

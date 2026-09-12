@@ -54,22 +54,26 @@ public class StandaloneSource<IN, OUT> implements NodeHarness {
     /** Per-input entry: lazily init, cast to the declared input type, run {@link #process}, and
      * return the emitted elements to the workflow. */
     @Override
-    public final FunctionResult<?> processViaEdge(Object element, Edge inboundEdge) {
-        ensureOpened();
+    public final FunctionResult<?> processElement(Object element, Edge inboundEdge) {
+        open();
         outputs.clear();
         try {
             @SuppressWarnings("unchecked")
             IN typed = (IN) element;
             process(typed, collector);
-        } catch (Exception e) {
-            throw new RuntimeException("StandaloneSource process failed", e);
+        } catch (Exception exception) {
+            throw new RuntimeException("StandaloneSource process failed", exception);
         }
         return new FunctionResult<>(List.copyOf(outputs), Map.of(), metricGroup.snapshot());
     }
 
+    /** Runs init() once, on first input (or eagerly when the builder requests it). */
     @Override
-    public final void openOnceEager() {
-        ensureOpened();
+    public final void open() {
+        if (!opened) {
+            init();
+            opened = true;
+        }
     }
 
     @Override
@@ -86,22 +90,7 @@ public class StandaloneSource<IN, OUT> implements NodeHarness {
     }
 
     @Override
-    public MetricGroup unwrapMetricGroup() {
+    public MetricGroup metricGroup() {
         return metricGroup;
-    }
-
-    @Override
-    public Object unwrap() {
-        return this;
-    }
-
-    // ------------------------------------------------------------------------
-
-    /** Runs init() once, on first input (or eagerly when the builder requests it). */
-    private void ensureOpened() {
-        if (!opened) {
-            init();
-            opened = true;
-        }
     }
 }

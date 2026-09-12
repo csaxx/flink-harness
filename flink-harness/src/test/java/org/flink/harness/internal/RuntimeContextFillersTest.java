@@ -41,25 +41,23 @@ class RuntimeContextFillersTest {
     }
 
     // ------------------------------------------------------------------------
-    // globalJobParameters — setter
+    // globalJobParameters — constructor
     // ------------------------------------------------------------------------
 
     @Test
-    void setGlobalJobParametersMakesCopy() {
-        StandaloneRuntimeContext ctx = new StandaloneRuntimeContext("test");
+    void constructorGlobalJobParametersMakesCopy() {
         Map<String, String> mutable = new HashMap<>();
         mutable.put("key1", "val1");
-        ctx.setGlobalJobParameters(mutable);
+        StandaloneRuntimeContext ctx = new StandaloneRuntimeContext("test", mutable);
         assertThat(ctx.getGlobalJobParameters()).containsEntry("key1", "val1");
-        // mutation after set does not affect stored copy
+        // mutation after construction does not affect stored copy
         mutable.put("key1", "mutated");
         assertThat(ctx.getGlobalJobParameters()).containsEntry("key1", "val1");
     }
 
     @Test
-    void setGlobalJobParametersRejectsNull() {
-        StandaloneRuntimeContext ctx = new StandaloneRuntimeContext("test");
-        assertThatThrownBy(() -> ctx.setGlobalJobParameters(null))
+    void constructorGlobalJobParametersRejectsNull() {
+        assertThatThrownBy(() -> new StandaloneRuntimeContext("test", null))
                 .isInstanceOf(NullPointerException.class);
     }
 

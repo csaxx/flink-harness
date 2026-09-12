@@ -115,13 +115,13 @@ class StandaloneRunnerTest {
     }
 
     @Test
-    void clearStateResetsAccumulator() {
+    void resetStateResetsAccumulator() {
         StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS);
         try {
             wf.process(List.of("Alice,book,2,12.50"), "csv");
-            wf.clearState("accum");
-            WorkflowResult afterClear = wf.process(List.of("Alice,pen,1,5.00"), "csv");
-            assertThat(afterClear.outputsOf("accumOut")).containsExactly(
+            wf.resetState("accum");
+            WorkflowResult afterReset = wf.process(List.of("Alice,pen,1,5.00"), "csv");
+            assertThat(afterReset.outputsOf("accumOut")).containsExactly(
                     "customer=Alice orders=1 total=5.00");
         } finally {
             wf.close();
@@ -129,13 +129,13 @@ class StandaloneRunnerTest {
     }
 
     @Test
-    void clearStateAllResetsEverything() {
+    void resetStateAllResetsEverything() {
         StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS);
         try {
             wf.process(List.of("Alice,book,2,12.50", "Bob,pen,1,3.00"), "csv");
-            wf.clearStateAll();
-            WorkflowResult afterClear = wf.process(List.of("Alice,pen,1,5.00"), "csv");
-            assertThat(afterClear.outputsOf("accumOut")).containsExactly(
+            wf.resetStateAll();
+            WorkflowResult afterReset = wf.process(List.of("Alice,pen,1,5.00"), "csv");
+            assertThat(afterReset.outputsOf("accumOut")).containsExactly(
                     "customer=Alice orders=1 total=5.00");
         } finally {
             wf.close();
@@ -143,13 +143,13 @@ class StandaloneRunnerTest {
     }
 
     @Test
-    void clearMetricsResetsCounters() {
+    void resetMetricsResetsCounters() {
         StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS);
         try {
             wf.process(List.of("Alice,book,2,12.50"), "csv");
-            wf.clearMetrics("parse");
-            WorkflowResult afterClear = wf.process(List.of("Bob,pen,1,3.00"), "csv");
-            assertThat(afterClear.functionResults().get("parse").metrics().get("parsedCount")).isEqualTo(1L);
+            wf.resetMetrics("parse");
+            WorkflowResult afterReset = wf.process(List.of("Bob,pen,1,3.00"), "csv");
+            assertThat(afterReset.functionResults().get("parse").metrics().get("parsedCount")).isEqualTo(1L);
         } finally {
             wf.close();
         }

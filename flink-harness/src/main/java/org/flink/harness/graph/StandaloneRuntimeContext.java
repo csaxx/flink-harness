@@ -36,7 +36,7 @@ import java.util.Set;
 /**
  * Standalone {@link RuntimeContext}: metrics via {@link StandaloneOperatorMetricGroup},
  * keyed state v1+v2 via {@link InMemoryKeyedStateStore}, global job parameters via
- * {@link #setGlobalJobParameters(Map)}, serializers via
+ * constructor, serializers via
  * {@link #createSerializer(TypeInformation)}. Everything else (broadcast vars,
  * distributed cache, accumulators, ...) throws
  * {@link UnsupportedOperationException}. Accumulators are permanently out of scope
@@ -48,13 +48,18 @@ public class StandaloneRuntimeContext implements RuntimeContext {
     private final InMemoryKeyedStateStore stateStore;
     private final JobInfo jobInfo;
     private final TaskInfo taskInfo;
-    private volatile Map<String, String> globalJobParameters = Map.of();
+    private final Map<String, String> globalJobParameters;
+
+    public StandaloneRuntimeContext(String functionName) {
+        this(functionName, Map.of());
+    }
 
     /** One context per node: it owns that node's metric group and keyed state store. The anonymous
      * JobInfo/TaskInfo below deliberately report a fixed single-subtask topology. */
-    public StandaloneRuntimeContext(String functionName) {
+    public StandaloneRuntimeContext(String functionName, Map<String, String> globalJobParameters) {
         this.metricGroup = new StandaloneOperatorMetricGroup(functionName);
         this.stateStore = new InMemoryKeyedStateStore();
+        this.globalJobParameters = Map.copyOf(globalJobParameters);
         this.jobInfo = new JobInfo() {
             @Override
             public org.apache.flink.api.common.JobID getJobId() {
@@ -107,11 +112,6 @@ public class StandaloneRuntimeContext implements RuntimeContext {
     /** Access to the chained state store (used by harnesses to bind keys). */
     public InMemoryKeyedStateStore stateStore() {
         return stateStore;
-    }
-
-    /** Wires global job parameters (immutable). Called once at build time. */
-    public void setGlobalJobParameters(Map<String, String> params) {
-        this.globalJobParameters = Map.copyOf(params);
     }
 
     @Override

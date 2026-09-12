@@ -54,20 +54,29 @@ If you change any of these, update this section AND re-evaluate all code.
 | JsonSource / JsonSink | ✔ convenience, Jackson-databind (provided scope) |
 | Side-channel edges (OutputTag on `Edge`) | ✔ main/side output routing via `sideTag == null` |
 
-### Harness approach (2026-09-03)
+### Harness approach (2026-09-03, restructured 2026-09-12)
 
 - **`NodeHarness`** interface consumed by `StandaloneWorkflow`. Implemented by:
-  - `FunctionHarness` (abstract) — wraps Flink `RichFunction`, wires `RuntimeContext`, keyed state.
+  - `FunctionHarness<F extends RichFunction>` (abstract) — wraps a constructor-injected Flink
+    function (`getFunction()`), wires `RuntimeContext`, owns open/close lifecycle and metrics.
+  - `AbstractRichFunctionHarness<F extends AbstractRichFunction>` (abstract) — adds key binding
+    and keyed-state scoping (Flink-faithful: any rich function on a keyed edge may use keyed
+    state; only non-keyed streams throw in Flink).
   - `StandaloneSource` / `StandaloneSink` — synthetic nodes with no-op lifecycle and own metric group.
-- Subtypes of `FunctionHarness`: `ProcessFunctionHarness`, `KeyedProcessFunctionHarness`, `RichFunctionHarness`
+- Concrete harnesses, one per Flink function type: `ProcessFunctionHarness`,
+  `KeyedProcessFunctionHarness` (timers), `RichMapFunctionHarness`,
+  `RichFlatMapFunctionHarness`, `RichFilterFunctionHarness`.
 - `Context` and `OnTimerContext` are **non-static inner classes** — instantiated through the wrapped function instance (same technique as Flink operator internals).
-- `open(OpenContext)` called once (OpenContext is empty interface — pass singleton).
+- `open()` is idempotent via an `opened` flag: called eagerly at `build()` under
+  `initializeAtBuild()`, lazily on the first element otherwise. `KeyedProcessFunctionHarness.open()`
+  binds a dummy placeholder key when no key is bound yet (eager path) so state-handle
+  registration cannot fail; the first keyed element replaces it.
 - `close()` called when the workflow is torn down.
 - Main and side outputs are captured per invocation inside each harness (`Context.output` records side outputs); `RecordingCollector` is a trivial list-backed `Collector`.
 - **Type-safe public surface, raw types inside** — unchecked `@SuppressWarnings` is confined
-  to narrow boundary helpers: key-selector invocation (`FunctionHarness.bindKey`),
-  function/element casts in the harness constructors and `invokeUnchecked`,
-  source/sink passthrough casts, `WorkflowResult.sideOutputsOf`, and the
+  to narrow boundary helpers: key-selector invocation (`AbstractRichFunctionHarness.bindKey`),
+  function casts in the harness constructors, source/sink passthrough casts,
+  `WorkflowResult.sideOutputsOf`, and the
   `org.flink.harness.state` accessors / `CompletedStateFuture.resolve`. Details in
   `agent/harnesses.md`.
 
@@ -105,7 +114,7 @@ new WorkflowBuilder(mode)
 
 `process(inputs, sourceId)` returns `WorkflowResult(functionResults, aggregatedMetrics)` — functionResults is a `Map<nodeId, FunctionResult<Object>>` for nodes that produced outputs (sinks) or metrics; `aggregatedMetrics` is a flat cross-node map where counters/meters/histograms are summed and gauges last-wins.
 
-Modes: `CONTINUOUS` (metrics & state accumulate like real Flink; manual `clearState(id)` / `clearStateAll()` / `clearMetrics()`) and `TRANSIENT` (everything cleared after each `process()` call, including on exception via try/finally).
+Modes: `CONTINUOUS` (metrics & state accumulate like real Flink; manual `resetState(id)` / `resetStateAll()` / `resetMetrics(id)` / `resetMetricsAll()`) and `TRANSIENT` (everything cleared after each `process()` call, including on exception via try/finally).
 
 ### Processing-time timers (2026-09-07)
 
@@ -136,9 +145,9 @@ StandaloneWorkflow.getTimerService()
 
 ### Thread safety
 
-- Thread-safe by default. One `ReentrantLock` on each `StandaloneWorkflow` guards the entire `process()` call and every `clear*`/`close()` operation (including the TRANSIENT reset, executed within the lock in the same `try/finally` that eventually unlocks).
+- Thread-safe by default. One `ReentrantLock` on each `StandaloneWorkflow` guards the entire `process()` call and every `reset*`/`close()` operation (including the TRANSIENT reset, executed within the lock in the same `try/finally` that eventually unlocks).
 - Multiple workflows do not contend; separate instances have separate locks.
-- Direct harness access (`harness.processViaEdge`) is deliberately unlocked — the workflow is the only supported multithreaded entry point.
+- Direct harness access (`harness.processElement`) is deliberately unlocked — the workflow is the only supported multithreaded entry point.
 - **BACKGROUND timer thread**: a single daemon thread per workflow that acquires the workflow lock before firing timers, guaranteeing `onTimer` never interleaves with `processElement`. The listener is invoked after releasing the lock to avoid deadlocks if the listener calls back into the workflow.
 
 ### Dependency sliminess
@@ -158,7 +167,7 @@ All operators run with parallelism-1 semantics (single "subtask"). No key redist
 |---|---|
 | `org.flink.harness` | Consumer API — `WorkflowBuilder`, `StandaloneWorkflow`, `WorkflowNode`, `Mode`, `Edge` |
 | `org.flink.harness.graph` | Implementation — `StandaloneRuntimeContext`, `RecordingCollector` |
-| `org.flink.harness.graph.function` | Nodes — `NodeHarness` (interface), `FunctionHarness` + subtypes, `HarnessFactory` (public, not API) |
+| `org.flink.harness.graph.function` | Nodes — `NodeHarness` (interface), `FunctionHarness` → `AbstractRichFunctionHarness` → concrete harnesses, `HarnessFactory` (public, not API) |
 | `org.flink.harness.graph.result` | Results — `FunctionResult`, `WorkflowResult` |
 | `org.flink.harness.graph.source` | `StandaloneSource`, `JsonSource` — public API, subclassable |
 | `org.flink.harness.graph.sink` | `StandaloneSink`, `JsonSink` — public API, subclassable |
@@ -182,6 +191,24 @@ All operators run with parallelism-1 semantics (single "subtask"). No key redist
   functional blocks gets a one-line `//` summary per block. Trivial methods (getters,
   fluent setters, record accessors) stay uncommented. When you add or materially change
   such a method, add/update its comment in the same change.
+- **Naming discipline** (2026-09-12): variable names (locals, fields, parameters) are
+  never a single character — they indicate type and, if applicable, function.
+  `FunctionHarness h = …` becomes `FunctionHarness functionHarness`;
+  `NodeHarness src = …` becomes `NodeHarness srcHarness`. Lambda parameters and
+  catch parameters may stay idiomatic.
+- **Design guidance** (2026-09-12):
+  - Mirror the wrapped library's class shape: one harness per Flink function type, and
+    shared behavior in an intermediate matching the upstream abstraction
+    (`AbstractRichFunction` ↔ `AbstractRichFunctionHarness`) rather than the root base.
+  - Constructor injection over post-construction wiring: everything a node needs
+    (function, clock, global job parameters) arrives via the constructor — no `set*`
+    calls at build time.
+  - One idempotent lifecycle method guarded by a flag (`open()`) instead of parallel
+    method pairs (`openOnce`/`openOnceEager`).
+  - Name methods after the wrapped domain's nomenclature (`processElement`, not
+    `processViaEdge`); name symmetric operations symmetrically
+    (`resetState`/`resetMetrics`/`resetAll`); name accessors after the thing
+    (`metricGroup()`), not the mechanism (`unwrapMetricGroup`).
 - After every code change, run `mvn -q verify` from root (use `mvnw` wrapper; requires Java 21 on PATH or `JAVA_HOME`).
 - If you add a new test, make sure it passes and update the CI check section.
 - To verify Flink API signatures or class availability, check the source on GitHub

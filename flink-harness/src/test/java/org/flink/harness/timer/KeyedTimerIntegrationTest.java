@@ -334,7 +334,7 @@ StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
     }
 
     @Test
-    void clearStateAlsoClearsTimers() {
+    void resetStateAlsoClearsTimers() {
         StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .setProcessingTimerMode(ProcessingTimerMode.MANUAL)
                 .addSource("in", TypeInformation.of(String.class))
@@ -346,7 +346,7 @@ StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .build(true);
 
         wf.process(List.of("hello"), "in");
-        wf.clearState("proc");
+        wf.resetState("proc");
         assertThat(wf.getTimerService().pendingTimerCount()).isEqualTo(0);
         wf.close();
     }

@@ -20,9 +20,9 @@ import java.util.Map;
  * Harness wrapping a {@link KeyedProcessFunction}: keyed access via the bound edge selector
  * and {@code #getCurrentKey()}. Supports processing-time timers.
  */
-public final class KeyedProcessFunctionHarness extends FunctionHarness {
+public final class KeyedProcessFunctionHarness
+        extends AbstractRichFunctionHarness<KeyedProcessFunction<Object, Object, Object>> {
 
-    private final KeyedProcessFunction<Object, Object, Object> function;
     private final KeyedProcessFunction<Object, Object, Object>.Context context;
     private final KeyedProcessFunction<Object, Object, Object>.OnTimerContext onTimerContext;
     private final List<Object> mainOutputs = new ArrayList<>();
@@ -33,9 +33,8 @@ public final class KeyedProcessFunctionHarness extends FunctionHarness {
     private final StandaloneTimerService timerService;
     private long onTimerTimestamp;
 
-    @SuppressWarnings("unchecked")
     public KeyedProcessFunctionHarness(String id, KeyedProcessFunction<?, ?, ?> function) {
-        this(id, function, SystemClock.getInstance(), true);
+        this(id, function, SystemClock.getInstance(), true, Map.of());
     }
 
     /** Contexts are created through the function instance because Flink declares Context and
@@ -46,10 +45,10 @@ public final class KeyedProcessFunctionHarness extends FunctionHarness {
             String id,
             KeyedProcessFunction<?, ?, ?> function,
             Clock clock,
-            boolean allowTimerRegistration) {
-        super(id);
-        this.function = (KeyedProcessFunction<Object, Object, Object>) function;
-        this.context = this.function.new Context() {
+            boolean allowTimerRegistration,
+            Map<String, String> globalJobParameters) {
+        super(id, (KeyedProcessFunction<Object, Object, Object>) function, globalJobParameters);
+        this.context = getFunction().new Context() {
             @Override
             public Long timestamp() {
                 return null;
@@ -62,7 +61,7 @@ public final class KeyedProcessFunctionHarness extends FunctionHarness {
 
             @Override
             public <X> void output(OutputTag<X> outputTag, X value) {
-                sideOutputs.computeIfAbsent(outputTag, t -> new ArrayList<>()).add(value);
+                sideOutputs.computeIfAbsent(outputTag, tag -> new ArrayList<>()).add(value);
             }
 
             @Override
@@ -70,7 +69,7 @@ public final class KeyedProcessFunctionHarness extends FunctionHarness {
                 return currentKey();
             }
         };
-        this.onTimerContext = this.function.new OnTimerContext() {
+        this.onTimerContext = getFunction().new OnTimerContext() {
             @Override
             public Long timestamp() {
                 return onTimerTimestamp;
@@ -88,7 +87,7 @@ public final class KeyedProcessFunctionHarness extends FunctionHarness {
 
             @Override
             public <X> void output(OutputTag<X> outputTag, X value) {
-                sideOutputs.computeIfAbsent(outputTag, t -> new ArrayList<>()).add(value);
+                sideOutputs.computeIfAbsent(outputTag, tag -> new ArrayList<>()).add(value);
             }
 
             @Override
@@ -100,15 +99,27 @@ public final class KeyedProcessFunctionHarness extends FunctionHarness {
                 clock, timerHeap, this::currentKey, true, allowTimerRegistration);
     }
 
+    /** Eager open happens before any element, so no key is bound yet: bind a dummy placeholder
+     * key to keep state-handle registration in open() from failing. The lazy path already has
+     * the first element's real key bound (key binding precedes lazy open), so it skips the
+     * dummy. The dummy is replaced on the first keyed element. */
+    @Override
+    public void open() {
+        if (!isOpened() && currentKey() == null) {
+            setCurrentKey(new Object());
+        }
+        super.open();
+    }
+
     /** Reuses the per-node output buffers, so they must be cleared before every invocation. */
     @Override
-    protected FunctionResult<?> invokeUnchecked(Object element) {
+    protected FunctionResult<?> processElement(Object element) {
         mainOutputs.clear();
         sideOutputs.clear();
         try {
-            function.processElement(element, context, mainCollector);
-        } catch (Exception e) {
-            throw new RuntimeException("processElement failed in " + getId(), e);
+            getFunction().processElement(element, context, mainCollector);
+        } catch (Exception exception) {
+            throw new RuntimeException("processElement failed in " + getId(), exception);
         }
         return buildResult();
     }
@@ -121,9 +132,9 @@ public final class KeyedProcessFunctionHarness extends FunctionHarness {
         setCurrentKey(entry.key());
         onTimerTimestamp = entry.timestamp();
         try {
-            function.onTimer(entry.timestamp(), onTimerContext, mainCollector);
-        } catch (Exception e) {
-            throw new RuntimeException("onTimer failed in " + getId(), e);
+            getFunction().onTimer(entry.timestamp(), onTimerContext, mainCollector);
+        } catch (Exception exception) {
+            throw new RuntimeException("onTimer failed in " + getId(), exception);
         }
         return buildResult();
     }
@@ -137,15 +148,10 @@ public final class KeyedProcessFunctionHarness extends FunctionHarness {
     }
 
     @Override
-    public void clearState() {
-        super.clearState();
+    public void resetState() {
+        super.resetState();
         // timers are keyed state too: clearing state must not leave timers to fire later
         timerHeap.clear();
-    }
-
-    @Override
-    public org.apache.flink.api.common.functions.RichFunction unwrap() {
-        return function;
     }
 
     @Override

@@ -9,7 +9,7 @@ import org.flink.harness.WorkflowBuilder;
 import org.flink.harness.graph.result.WorkflowResult;
 import org.flink.harness.graph.function.KeyedProcessFunctionHarness;
 import org.flink.harness.graph.function.ProcessFunctionHarness;
-import org.flink.harness.graph.function.RichFunctionHarness;
+import org.flink.harness.graph.function.RichMapFunctionHarness;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -25,11 +25,10 @@ class DemoFunctionsTest {
     @Test
     @SuppressWarnings("unchecked")
     void parseFnParsesCsv() {
-        RichFunctionHarness harness = new RichFunctionHarness(
-                "parse", new DemoFunctions.ParseFn(), RichFunctionHarness.Kind.MAP);
-        harness.openOnce();
+        RichMapFunctionHarness harness = new RichMapFunctionHarness("parse", new DemoFunctions.ParseFn());
+        harness.open();
         DemoFunctions.ParsedOrder order = (DemoFunctions.ParsedOrder)
-                ((List<Object>) harness.processViaEdge("cust1,item,3,10.0", null).outputs()).get(0);
+                ((List<Object>) harness.processElement("cust1,item,3,10.0", null).outputs()).get(0);
         assertThat(order.customer()).isEqualTo("cust1");
         assertThat(order.product()).isEqualTo("item");
         assertThat(order.quantity()).isEqualTo(3);
@@ -42,7 +41,7 @@ class DemoFunctionsTest {
     void routeFnRoutesGoodOrders() {
         ProcessFunctionHarness harness = new ProcessFunctionHarness("route", new DemoFunctions.RouteFn());
         DemoFunctions.ParsedOrder good = new DemoFunctions.ParsedOrder("c1", "p1", 2, 5.0);
-        var result = harness.processViaEdge(good, null);
+        var result = harness.processElement(good, null);
         assertThat((List<Object>) result.outputs()).containsExactly(good);
         assertThat(result.sideOutputs()).isEmpty();
     }
@@ -52,7 +51,7 @@ class DemoFunctionsTest {
     void routeFnRejectsBadOrders() {
         ProcessFunctionHarness harness = new ProcessFunctionHarness("route", new DemoFunctions.RouteFn());
         DemoFunctions.ParsedOrder bad = new DemoFunctions.ParsedOrder("c1", "p1", 0, 5.0);
-        var result = harness.processViaEdge(bad, null);
+        var result = harness.processElement(bad, null);
         assertThat((List<Object>) result.outputs()).isEmpty();
         assertThat((List<Object>) result.sideOutputs().get(DemoFunctions.REJECTED_TAG)).containsExactly(bad);
     }
@@ -68,9 +67,9 @@ class DemoFunctionsTest {
         DemoFunctions.ParsedOrder b = new DemoFunctions.ParsedOrder("c1", "p2", 1, 20.0);
         DemoFunctions.ParsedOrder c = new DemoFunctions.ParsedOrder("c2", "p3", 3, 5.0);
 
-        var r1 = harness.processViaEdge(a, edge);
-        var r2 = harness.processViaEdge(b, edge);
-        var r3 = harness.processViaEdge(c, edge);
+        var r1 = harness.processElement(a, edge);
+        var r2 = harness.processElement(b, edge);
+        var r3 = harness.processElement(c, edge);
 
         assertThat((List<Object>) r1.outputs()).containsExactly("customer=c1 orders=1 total=20.00");
         assertThat((List<Object>) r2.outputs()).containsExactly("customer=c1 orders=2 total=40.00");
@@ -82,7 +81,7 @@ class DemoFunctionsTest {
     void reportFnFormatsLine() {
         ProcessFunctionHarness harness = new ProcessFunctionHarness("report", new DemoFunctions.ReportFn());
         DemoFunctions.ParsedOrder order = new DemoFunctions.ParsedOrder("c1", "gadget", 3, 4.5);
-        var result = harness.processViaEdge(order, null);
+        var result = harness.processElement(order, null);
         assertThat((List<Object>) result.outputs()).containsExactly("product=gadget qty=3 total=13.50");
     }
 

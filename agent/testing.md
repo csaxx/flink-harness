@@ -58,20 +58,21 @@ Tests are the primary evidence for repository facts in the other `/agent` docs.
 | `WorkflowBuilderValidationTest` | Duplicate id, unknown edge, type mismatch, unkeyed inbound edge to a keyed function, unresolved generics → fail at `build()` / pass with `build(true)`, `initializeAtBuild()` opens eagerly and surfaces `open()` failures at build time. |
 | `KeyedProcessFunctionHarnessTest` | Per-key state isolation and `ctx.getCurrentKey()`; a keyed function invoked with no keyed edge fails loudly. |
 | `ProcessFunctionHarnessTest` | Main + side output capture, metric snapshot after invocation, `resetAll()` zeroing built-in counters. |
-| `RuntimeContextFillersTest` | `globalJobParameters` default/immutability/copy-on-set/null rejection/builder wiring/TRANSIENT survival; `createSerializer` round-trips (`String`, `Integer`, `Tuple2`); all accumulator accessors throw "permanently out of scope". |
+| `RichFunctionHarnessesTest` | Map null-drop, flatMap collector emissions, filter pass/drop, and keyed state in a `RichMapFunction` on a keyed edge (Flink-faithful keyed-state-for-rich-functions). |
+| `RuntimeContextFillersTest` | `globalJobParameters` default/immutability/constructor copy/null rejection/builder wiring/TRANSIENT survival; `createSerializer` round-trips (`String`, `Integer`, `Tuple2`); all accumulator accessors throw "permanently out of scope". |
 | `MetricGroupTest` | Counter accumulation + snapshot, nested group flattening (`errors.count`), recursive reset, gauge value exposure. |
 | `StateStoreTest` (v1) | "no bound key" failure, per-key isolation, descriptor defaults, list/map/reducing/aggregating operations, `clearCurrentKey` vs `clearAll`. |
 | `StateStoreV2Test` (v2) | v2 null/copy semantics, async eager chains, `StateIterator.onNext` behavior, all `then*` variants, exception propagation, foreign `StateFuture` rejection, TTL rejection for all five kinds, v1/v2 id isolation, clear coverage. |
 | `KeyedV2StateIntegrationTest` | v2 state through the full workflow: per-key counts, CONTINUOUS accumulation, TRANSIENT clearing. |
 | `TimerHeapTest` | `(key, timestamp)` ordering/dedup, delete, delete+re-register, cancelled-entry skipping, clear, peek, earliest timestamp. |
-| `KeyedTimerIntegrationTest` | OPPORTUNISTIC fire-after-element and not-before-timestamp, side/main outputs from `onTimer`, key+state binding in `onTimer`, timer chaining, MANUAL explicit firing, BACKGROUND delivery + error path, TRANSIENT UOE + build rejection, `pendingTimerCount`, `clearState` clears timers. |
+| `KeyedTimerIntegrationTest` | OPPORTUNISTIC fire-after-element and not-before-timestamp, side/main outputs from `onTimer`, key+state binding in `onTimer`, timer chaining, MANUAL explicit firing, BACKGROUND delivery + error path, TRANSIENT UOE + build rejection, `pendingTimerCount`, `resetState` clears timers. |
 | `JsonSourceTest` / `JsonSinkTest` | Jackson parse/serialize, custom mapper, compact vs pretty output, error wrapping. |
 
 ### `flink-test` (demo job)
 
 | Test class | Proves |
 |---|---|
-| `DemoFunctionsTest` | Each demo function through its harness (`RichFunctionHarness` MAP, `ProcessFunctionHarness`, `KeyedProcessFunctionHarness`) plus `fullWorkflowWithFanOut` end-to-end with sinks and a side output. Demonstrates constructing harnesses directly. |
+| `DemoFunctionsTest` | Each demo function through its harness (`RichMapFunctionHarness`, `ProcessFunctionHarness`, `KeyedProcessFunctionHarness`) plus `fullWorkflowWithFanOut` end-to-end with sinks and a side output. Demonstrates constructing harnesses directly. |
 | `TestSmokeTest` | The module compiles and its test harness runs. |
 
 `DemoFunctions` (parse → route → keyed accumulate / report, with `REJECTED_TAG` side
@@ -81,7 +82,7 @@ output) is the canonical multi-stage fixture; `TestSmokeTest` is a no-op guard.
 
 | Test class | Proves |
 |---|---|
-| `StandaloneRunnerTest` | Full runner DAG: accum/report/side outputs, per-node and aggregate metrics, CONTINUOUS accumulation, TRANSIENT reset, `clearState`, `clearStateAll`, `clearMetrics`, `getWorkflow()` kinds/successors, `getNodeIds()`, reading lines from a file. |
+| `StandaloneRunnerTest` | Full runner DAG: accum/report/side outputs, per-node and aggregate metrics, CONTINUOUS accumulation, TRANSIENT reset, `resetState`, `resetStateAll`, `resetMetrics`, `getWorkflow()` kinds/successors, `getNodeIds()`, reading lines from a file. |
 | `DependencyTreeTest` | Production dependency tree contains no `flink-test-utils`, `flink-clients`, `flink-runtime-test` (**Windows-only**, see caveats). |
 | `StandaloneSmokeTest` | Module loads. |
 

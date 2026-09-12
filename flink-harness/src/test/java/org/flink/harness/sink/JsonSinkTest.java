@@ -14,7 +14,7 @@ class JsonSinkTest {
     @Test
     void serializesToCompactJson() {
         var sink = new JsonSink<>(false);
-        var result = sink.processViaEdge(new Sample("x", 3), null);
+        var result = sink.processElement(new Sample("x", 3), null);
         assertThat(result.outputs()).hasSize(1);
         assertThat(result.outputs().get(0)).isEqualTo("{\"label\":\"x\",\"count\":3}");
     }
@@ -22,7 +22,7 @@ class JsonSinkTest {
     @Test
     void serializesWithPrettyPrint() {
         var sink = new JsonSink<>(true);
-        var result = sink.processViaEdge(new Sample("y", 5), null);
+        var result = sink.processElement(new Sample("y", 5), null);
         assertThat(result.outputs()).hasSize(1);
         String json = (String) result.outputs().get(0);
         assertThat(json).contains("\n");
@@ -34,7 +34,7 @@ class JsonSinkTest {
         var sink = new JsonSink<>(false);
         assertThat(org.junit.jupiter.api.Assertions.assertThrows(
                 RuntimeException.class,
-                () -> sink.processViaEdge(new Cyclic(this), null)))
+                () -> sink.processElement(new Cyclic(this), null)))
                 .isInstanceOf(RuntimeException.class);
     }
 }

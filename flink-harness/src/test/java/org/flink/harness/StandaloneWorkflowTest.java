@@ -89,7 +89,7 @@ class StandaloneWorkflowTest {
         WorkflowResult second = wf.process(List.of("a"), "in");
         assertThat(second.outputsOf("out")).containsExactly("a#2(A)");
 
-        wf.clearState("keyedCount");
+        wf.resetState("keyedCount");
         WorkflowResult third = wf.process(List.of("a"), "in");
         assertThat(third.outputsOf("out")).containsExactly("a#1(A)");
     }

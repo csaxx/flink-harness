@@ -13,7 +13,7 @@ class JsonSourceTest {
     @Test
     void parsesValidJson() {
         var source = new JsonSource<>(Record.class);
-        var result = source.processViaEdge("{\"name\":\"alice\",\"value\":42}", null);
+        var result = source.processElement("{\"name\":\"alice\",\"value\":42}", null);
         assertThat(result.outputs()).hasSize(1);
         Record r = (Record) result.outputs().get(0);
         assertThat(r.name).isEqualTo("alice");
@@ -23,7 +23,7 @@ class JsonSourceTest {
     @Test
     void wrapsParseException() {
         var source = new JsonSource<>(Record.class);
-        assertThatThrownBy(() -> source.processViaEdge("not-json", null))
+        assertThatThrownBy(() -> source.processElement("not-json", null))
                 .isInstanceOf(RuntimeException.class)
                 .hasCauseInstanceOf(RuntimeException.class);
     }
@@ -33,7 +33,7 @@ class JsonSourceTest {
         var mapper = new ObjectMapper()
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         var source = new JsonSource<>(Record.class, mapper);
-        var result = source.processViaEdge(
+        var result = source.processElement(
                 "{\"name\":\"bob\",\"value\":7,\"extra\":\"ignored\"}", null);
         Record r = (Record) result.outputs().get(0);
         assertThat(r.name).isEqualTo("bob");

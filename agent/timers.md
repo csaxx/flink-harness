@@ -118,9 +118,9 @@ calls throw. Construct a new workflow to recover.
 
 ## Interaction with state/modes
 
-- `StandaloneWorkflow.clearState(nodeId)` / `clearStateAll()` → for keyed nodes this
-  calls `KeyedProcessFunctionHarness.clearState()`, which clears the heap as well as
-  keyed state (proved by `clearStateAlsoClearsTimers`).
+- `StandaloneWorkflow.resetState(nodeId)` / `resetStateAll()` → for keyed nodes this
+  calls `KeyedProcessFunctionHarness.resetState()`, which clears the heap as well as
+  keyed state (proved by `resetStateAlsoClearsTimers`).
 - `Mode.TRANSIENT` resets everything (state + metrics + heap) after each `process()`;
   timers cannot be registered in the first place.
 - CONTINUOUS leaves pending timers across `process()` calls.
@@ -187,7 +187,7 @@ calls throw. Construct a new workflow to recover.
     `backgroundModeDeliversErrorOnTimerFailure` (timing-sensitive; use sleeps)
   - `transientModeRegisterProcessingTimeTimerThrowsUoe`,
     `transientModeWithExplicitTimerModeFailsAtBuild`
-  - `pendingTimerCountIsCorrectAcrossModes`, `clearStateAlsoClearsTimers`
+  - `pendingTimerCountIsCorrectAcrossModes`, `resetStateAlsoClearsTimers`
 
 Background tests depend on real wall-clock polling (~100 ms) and `Thread.sleep`; keep
 that in mind when running under load. Deterministic tests for OPPORTUNISTIC/MANUAL use

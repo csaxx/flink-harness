@@ -3,9 +3,10 @@
 ## Purpose
 
 Explains how Flink `RichFunction` instances are wrapped as graph nodes: the
-`NodeHarness` contract, `FunctionHarness` base lifecycle, key binding, the
-non-static `Context` construction technique, the supported function types, and the
-synthetic source/sink nodes. This is where Flink's operator lifecycle is emulated.
+`NodeHarness` contract, the `FunctionHarness` → `AbstractRichFunctionHarness`
+lifecycle and key binding, the non-static `Context` construction technique, the
+supported function types, and the synthetic source/sink nodes. This is where
+Flink's operator lifecycle is emulated.
 
 ## Read this when
 
@@ -21,24 +22,31 @@ synthetic source/sink nodes. This is where Flink's operator lifecycle is emulate
 ```
 StandaloneWorkflow
    └── NodeHarness                       (only interface the workflow knows)
-         ├── FunctionHarness             (abstract; wraps a Flink RichFunction)
-         │     ├── ProcessFunctionHarness
-         │     ├── KeyedProcessFunctionHarness
-         │     └── RichFunctionHarness   (MAP / FLATMAP / FILTER)
+         ├── FunctionHarness<F>             (abstract; lifecycle + metrics)
+         │     └── AbstractRichFunctionHarness<F>   (abstract; key binding + keyed state)
+         │           ├── ProcessFunctionHarness
+         │           ├── KeyedProcessFunctionHarness   (+ timers)
+         │           ├── RichMapFunctionHarness
+         │           ├── RichFlatMapFunctionHarness
+         │           └── RichFilterFunctionHarness
          ├── StandaloneSource            (synthetic, subclassable)
          └── StandaloneSink              (synthetic, subclassable)
 ```
+
+The hierarchy mirrors Flink's own shape (`RichFunction` → `AbstractRichFunction` →
+concrete functions): lifecycle is universal, key/state management is a property of
+rich functions on keyed edges.
 
 ## NodeHarness contract
 
 `flink-harness/src/main/java/org/flink/harness/graph/function/NodeHarness.java`
 
-- `FunctionResult<?> processViaEdge(Object element, Edge inboundEdge)` — invoke once
+- `FunctionResult<?> processElement(Object element, Edge inboundEdge)` — invoke once
   for one inbound element; `inboundEdge` carries the key selector / side tag.
-- `openOnceEager()` — default no-op; eager-open nodes at build time.
-- `close()`, `clearState()`, `clearMetrics()`, `resetAll()` (clearState+clearMetrics).
+- `open()` — default no-op; called eagerly at build time under `initializeAtBuild()`.
+- `close()`, `resetState()`, `resetMetrics()`, `resetAll()` (resetState+resetMetrics).
 - `requiresKeyedEdge()` — default `false`; `true` only for keyed functions.
-- `metricsSnapshot()`, `unwrapMetricGroup()`, `unwrap()` — introspection.
+- `metricsSnapshot()`, `metricGroup()` — introspection.
 
 Public only because package visibility does not cross packages. Implement it through
 the provided abstract classes.
@@ -47,46 +55,53 @@ the provided abstract classes.
 
 `flink-harness/src/main/java/org/flink/harness/graph/function/FunctionHarness.java`
 
-Fields per node: `id`, one `StandaloneRuntimeContext`, its `InMemoryKeyedStateStore`,
-an `opened` flag, and `currentKey`.
+`FunctionHarness<F extends RichFunction>` holds per node: `id`, the constructor-injected
+`function` (exposed via `getFunction()`), one `StandaloneRuntimeContext` (created with
+the constructor-injected global job parameters), and an `opened` flag. Key/state
+management lives one level down in `AbstractRichFunctionHarness`.
 
-`processViaEdge(element, edge)` runs in this exact order — preserve it:
+`processElement(element, edge)` on `AbstractRichFunctionHarness` runs in this exact
+order — preserve it:
 
 1. `bindKey(element, edge)` — if `edge != null && edge.keyed()`, cast the `KeySelector`
    to `KeySelector<Object, Object>`, call `getKey(element)`, store as `currentKey` and
    push it into the state store. A selector failure is wrapped as
    `RuntimeException("keySelector failed on edge src→dst")`.
-2. `openOnce()` — if not yet opened: `RichFunction.setRuntimeContext(runtimeContext)`
+2. `open()` — if not yet opened: `RichFunction.setRuntimeContext(runtimeContext)`
    then `RichFunction.open(OPEN_CONTEXT)` (a singleton empty `OpenContext`).
    Failure → `RuntimeException("open() failed for <id>")`.
-3. `invokeUnchecked(element)` — subtype-specific.
+3. `processElement(element)` — subtype-specific (protected abstract).
 
 Consequences of that ordering:
 
 - **Lazy open sees the first element's key already bound**, so `open()` may read
   `getRuntimeContext().getState(...)` and even the current key.
-- `openOnce()` is idempotent; the second element does not re-open.
+- `open()` is idempotent via the `opened` flag; the second element does not re-open.
+  The same method serves the eager path (`WorkflowBuilder.initializeAtBuild()` calls
+  `open()` on every node at build time) and the lazy path.
 - Key selectors run before the function, so a bad selector fails the whole run with
   the edge named.
 
-`openOnceEager()` (used by `initializeAtBuild()`): if the node requires a keyed edge
-and is not yet opened, it binds **a dummy placeholder key** (`new Object()`) before
-`openOnce()`, so state-handle registration in `open()` cannot hit the
-"no bound key" failure. The dummy key is replaced on the first keyed element.
+`KeyedProcessFunctionHarness.open()` (eager path): when not yet opened and no key is
+bound (`currentKey() == null` — true only before the first element), it binds **a
+dummy placeholder key** (`new Object()`) before delegating, so state-handle
+registration in `open()` cannot hit the "no bound key" failure. The dummy key is
+replaced on the first keyed element.
 
 `close()` calls `RichFunction.close()` only when `opened`; failure → `close() failed for <id>`.
-`clearState()` clears the store and nulls `currentKey`; `clearMetrics()` resets the
+`resetState()` clears the store and nulls `currentKey`; `resetMetrics()` resets the
 operator metric group counters; `resetAll()` does both (used by TRANSIENT mode).
 
-`setGlobalJobParameters` is called once by `WorkflowBuilder` at build time.
+Global job parameters arrive via the constructor (through `HarnessFactory.create`);
+there is no post-construction wiring.
 
 ## The inner `Context` technique
 
 `KeyedProcessFunctionHarness` / `ProcessFunctionHarness` create their contexts as
 
 ```java
-this.context = this.function.new Context() { … };
-this.onTimerContext = this.function.new OnTimerContext() { … };
+this.context = getFunction().new Context() { … };
+this.onTimerContext = getFunction().new OnTimerContext() { … };
 ```
 
 This is deliberate and Flink-faithful: upstream `ProcessFunction.Context` and
@@ -115,7 +130,7 @@ upstream class shape.
 ### `KeyedProcessFunctionHarness`
 
 - Wraps `KeyedProcessFunction`; `requiresKeyedEdge() == true`.
-- `Context.getCurrentKey()` delegates to `FunctionHarness.currentKey()`.
+- `Context.getCurrentKey()` delegates to `AbstractRichFunctionHarness.currentKey()`.
 - `OnTimerContext.timestamp()` returns the firing timestamp and `timeDomain()` is
   always `TimeDomain.PROCESSING_TIME`.
 - Owns a `TimerHeap` and a `StandaloneTimerService` wired with the shared workflow
@@ -123,29 +138,34 @@ upstream class shape.
 - `fireTimer(TimerHeap.TimerEntry)` binds `entry.key()`, sets the timestamp, clears
   buffers, calls `onTimer(...)`, and returns a `FunctionResult`. Called only by the
   workflow (see `timers.md`).
-- `clearState()` additionally clears the timer heap.
+- `resetState()` additionally clears the timer heap.
 
-### `RichFunctionHarness`
+### `RichMapFunctionHarness` / `RichFlatMapFunctionHarness` / `RichFilterFunctionHarness`
 
-- Wraps `RichMapFunction` / `RichFlatMapFunction` / `RichFilterFunction`.
-- `Kind.MAP`: `map(element)`; a `null` return produces no output.
-- `Kind.FLATMAP`: `flatMap(element, collector)`.
-- `Kind.FILTER`: element is passed through unchanged when `filter(element)` is true,
-  otherwise dropped.
+One harness per rich single-IO function type (no shared `Kind` switch):
+
+- `RichMapFunctionHarness`: `map(element)`; a `null` return produces no output.
+- `RichFlatMapFunctionHarness`: `flatMap(element, collector)`.
+- `RichFilterFunctionHarness`: element is passed through unchanged when
+  `filter(element)` is true, otherwise dropped.
 - No side outputs (these interfaces have no `output`).
 - `requiresKeyedEdge() == false`, **but** keyed state still works if the incoming edge
-  is keyed, because `bindKey` is inherited: any `FunctionHarness` on a keyed edge can
-  use `getRuntimeContext().getState(...)`. `requiresKeyedEdge` is only a build-time
-  requirement, not a capability gate.
+  is keyed, because `bindKey` is inherited from `AbstractRichFunctionHarness`: any
+  rich function on a keyed edge can use `getRuntimeContext().getState(...)`
+  (Flink-faithful — `StreamingRuntimeContext` only rejects state on non-keyed
+  streams). `requiresKeyedEdge` is only a build-time requirement, not a capability
+  gate. Proved by `RichFunctionHarnessesTest.mapUsesKeyedStateOnKeyedEdge`.
 
 ### `HarnessFactory`
 
 `flink-harness/src/main/java/org/flink/harness/graph/function/HarnessFactory.java`
-dispatches by `instanceof` in this order: `ProcessFunction`, `KeyedProcessFunction`,
-`RichMapFunction`, `RichFlatMapFunction`, `RichFilterFunction`; `allowTimerRegistration`
-is `mode == Mode.CONTINUOUS`. Anything else that is a `RichFunction`, and anything not
-a `RichFunction`, throws `IllegalArgumentException` naming the class. New supported
-types are added here.
+`create(id, function, clock, mode, globalJobParameters)` dispatches by `instanceof`
+in this order: `ProcessFunction`, `KeyedProcessFunction`, `RichMapFunction`,
+`RichFlatMapFunction`, `RichFilterFunction`; `allowTimerRegistration` is
+`mode == Mode.CONTINUOUS`. Everything a harness needs (function, clock, params) is
+passed into its constructor here. Anything else that is a `RichFunction`, and
+anything not a `RichFunction`, throws `IllegalArgumentException` naming the class.
+New supported types are added here.
 
 ## Synthetic nodes
 
@@ -158,9 +178,9 @@ types are added here.
 - `init()` / `dispose()` are lifecycle hooks called once on first input / at close.
 - `getMetricGroup()` exposes a per-instance `StandaloneOperatorMetricGroup` for
   subclass metrics — the only way custom nodes report metrics.
-- `processViaEdge` casts the element to `IN`, calls `process`, and returns the recorded
+- `processElement` casts the element to `IN`, calls `process`, and returns the recorded
   outputs. Failure → `RuntimeException("StandaloneSource process failed")`.
-- `openOnceEager()` just runs `init()`.
+- `open()` just runs `init()` once (flag-guarded).
 - `requiresKeyedEdge()` is inherited `false`; sources cannot be keyed destinations
   (topology forbids inbound edges).
 
@@ -188,22 +208,22 @@ node and `clear()` the backing list before each invocation.
 
 - Lifecycle order is `setRuntimeContext` → `open` → per-element invocations → `close`.
 - `open` runs at most once per node; lazy first-element path has the real key bound,
-  eager path has a dummy key.
+  eager path has a dummy key (keyed functions only).
 - Per-invocation output buffers are cleared before every `processElement`/`onTimer`;
   the returned lists are immutable copies.
 - A source/sink subclass must not assume its `init()`/`dispose()` runs more than once.
-- Only `KeyedProcessFunctionHarness` requires a keyed edge; all `FunctionHarness`
-  subtypes can *use* keyed state on a keyed edge.
+- Only `KeyedProcessFunctionHarness` requires a keyed edge; all
+  `AbstractRichFunctionHarness` subtypes can *use* keyed state on a keyed edge.
 - The contexts must be created via the function instance's inner classes.
 
 ## Important implementation patterns
 
-- Add capabilities to `FunctionHarness` and select them in `HarnessFactory`; do not
-  special-case concrete harness types in `WorkflowBuilder`.
+- Add capabilities to `FunctionHarness`/`AbstractRichFunctionHarness` and select them
+  in `HarnessFactory`; do not special-case concrete harness types in `WorkflowBuilder`.
 - Wrap checked exceptions with the node id and operation ("open() failed for",
   "processElement failed in", "onTimer failed in") so failures are attributable.
-- Keep generic casts inside `invokeUnchecked` or the constructor; the public
-  `processViaEdge` stays typed.
+- Keep generic casts inside the subtype constructors; the public `processElement`
+  stays typed.
 - Subclassable nodes expose lifecycle hooks and a metric group, not internal buffers.
 
 ## Raw-cast confinement policy
@@ -211,10 +231,11 @@ node and `clear()` the backing list before each invocation.
 Unchecked casts are allowed only at narrow boundary helpers, each marked
 `@SuppressWarnings("unchecked")`:
 
-1. `FunctionHarness.bindKey` — `KeySelector` invocation.
-2. `KeyedProcessFunctionHarness` / `ProcessFunctionHarness` / `RichFunctionHarness`
-   constructors and `invokeUnchecked` — `RichFunction`/typed-function casts.
-3. `StandaloneSource.processViaEdge` / `StandaloneSink.processViaEdge` — element cast
+1. `AbstractRichFunctionHarness.bindKey` — `KeySelector` invocation.
+2. `KeyedProcessFunctionHarness` / `ProcessFunctionHarness` / `RichMapFunctionHarness`
+   / `RichFlatMapFunctionHarness` / `RichFilterFunctionHarness` constructors —
+   wildcard-function to typed-function casts.
+3. `StandaloneSource.processElement` / `StandaloneSink.processElement` — element cast
    to `IN`.
 4. `WorkflowResult.sideOutputsOf` — side-output list cast.
 5. `org.flink.harness.state` accessors (`InMemoryKeyedStateStore`, `InMemoryStateV2`)
@@ -238,13 +259,13 @@ public API layer.
 
 ## Common pitfalls / agent traps
 
-- **Reordering `bindKey` and `openOnce`.** That breaks `open()`-registered state and
+- **Reordering `bindKey` and `open`.** That breaks `open()`-registered state and
   the eager dummy-key guarantee.
 - **Making `Context` static.** Upstream declares them as inner classes.
 - **Assuming `ProcessFunctionHarness` honors the workflow `Clock`** for
   `currentProcessingTime()`. It calls the system clock.
-- **Assuming `RichFunctionHarness` is never keyed.** It can be, and then it can use
-  keyed state.
+- **Assuming the rich map/flatmap/filter harnesses are never keyed.** They can be,
+  and then they can use keyed state.
 - **Assuming side outputs are available on all function types.** Only
   `ProcessFunction`/`KeyedProcessFunction` expose `ctx.output`.
 - **Adding a function type without a `HarnessFactory` branch** — build fails.
@@ -258,7 +279,9 @@ public API layer.
   `unkeyedEdgeFailsLoudlyAtRuntime` proves a keyed function with no keyed edge fails.
 - `flink-harness/.../functions/ProcessFunctionHarnessTest` — main + side output
   capture, metric snapshot, `resetAll`.
-- `flink-test/.../DemoFunctionsTest` — exercises `RichFunctionHarness`,
+- `flink-harness/.../functions/RichFunctionHarnessesTest` — map null-drop, flatMap
+  collector, filter pass/drop, and keyed state in a `RichMapFunction` on a keyed edge.
+- `flink-test/.../DemoFunctionsTest` — exercises `RichMapFunctionHarness`,
   `ProcessFunctionHarness`, `KeyedProcessFunctionHarness` and a full workflow,
   including `parse`/`route`/`accum`/`report`.
 - `flink-harness/.../source/JsonSourceTest` and `.../sink/JsonSinkTest` — JSON
@@ -268,9 +291,9 @@ public API layer.
 
 | Symptom | First inspect |
 |---|---|
-| `open() failed for <id>` | the function's `open`, `FunctionHarness.openOnce` |
+| `open() failed for <id>` | the function's `open`, `FunctionHarness.open` |
 | `processElement failed in <id>` | function body; cause is chained |
-| `keySelector failed on edge a→b` | `FunctionHarness.bindKey`, the `KeySelector` |
+| `keySelector failed on edge a→b` | `AbstractRichFunctionHarness.bindKey`, the `KeySelector` |
 | state "no bound key" | edge not keyed, or state accessed outside invocation |
 | side output lost | no matching side-output edge, or function lacks `ctx.output` |
 | `UnsupportedOperationException` on timers in a non-keyed function | by design — use `KeyedProcessFunction` |
@@ -282,7 +305,7 @@ public API layer.
   their results are routed/aggregated.
 - [runtime-context.md](./runtime-context.md) — the `RuntimeContext` every harness
   supplies to its function.
-- [state.md](./state.md) — the store `FunctionHarness` binds keys into.
+- [state.md](./state.md) — the store `AbstractRichFunctionHarness` binds keys into.
 - [timers.md](./timers.md) — `KeyedProcessFunctionHarness`'s `TimerHeap`/service.
 - [metrics.md](./metrics.md) — the metric group exposed by functions and nodes.
 - [testing.md](./testing.md) — fixture inventory.
@@ -294,5 +317,7 @@ public API layer.
   — establishes that `Context`/`OnTimerContext` are non-static inner classes.
 - Flink 2.3 `RuntimeContext`:
   https://raw.githubusercontent.com/apache/flink/release-2.3.0/flink-core/src/main/java/org/apache/flink/api/common/functions/RuntimeContext.java
+- Flink 2.3 `StreamingRuntimeContext` (keyed state only rejected on non-keyed streams):
+  https://raw.githubusercontent.com/apache/flink/release-2.3.0/flink-runtime/src/main/java/org/apache/flink/streaming/api/operators/StreamingRuntimeContext.java
 - Flink 2.3 docs, process functions:
   https://nightlies.apache.org/flink/flink-docs-release-2.3/docs/dev/datastream/operators/process_function/

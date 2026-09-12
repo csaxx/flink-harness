@@ -22,7 +22,7 @@ RichFunction.getRuntimeContext()
          ├── StandaloneOperatorMetricGroup  → metrics.md
          ├── InMemoryKeyedStateStore        → state.md (v1 + v2)
          ├── JobInfo / TaskInfo             (anonymous, single-subtask)
-         ├── globalJobParameters            (immutable copy, build-time)
+         ├── globalJobParameters            (immutable copy, constructor-injected)
          └── createSerializer(TypeInformation)
 ```
 
@@ -32,10 +32,10 @@ RichFunction.getRuntimeContext()
 
 | Member | Behavior |
 |---|---|
-| `StandaloneRuntimeContext(String functionName)` | Creates the operator metric group and state store; `functionName` is used as job/task name. |
+| `StandaloneRuntimeContext(String functionName)` | Creates the operator metric group and state store; `functionName` is used as job/task name; empty global job parameters. |
+| `StandaloneRuntimeContext(String, Map<String,String>)` | Also stores the global job parameters as an immutable `Map.copyOf`; null → `NullPointerException` (from `Map.copyOf`). Used by the harness constructors. |
 | `getMetricGroup()` | Returns `StandaloneOperatorMetricGroup` (an `OperatorMetricGroup`). |
 | `stateStore()` | Internal accessor used by harnesses to bind keys (not Flink API). |
-| `setGlobalJobParameters(Map)` | Stores an immutable `Map.copyOf(params)`; null → `NullPointerException` (from `Map.copyOf`). Called once by the builder. |
 | `getGlobalJobParameters()` | Defaults to `Map.of()`; immutable. |
 | `getState/getListState/getReducingState/getAggregatingState/getMapState` (v1) | Delegate to `InMemoryKeyedStateStore`; behavior in `state.md`. |
 | `getState/getListState/...` (v2, `org.apache.flink.api.common.state.v2.*`) | Same store, separate namespace; TTL-enabled descriptors rejected. |
@@ -109,7 +109,7 @@ Accumulators are permanently out of scope; the message steers callers to metrics
 
 `flink-harness/src/test/java/org/flink/harness/internal/RuntimeContextFillersTest.java`:
 
-- default/immutability of `globalJobParameters`, copy-on-set, null rejection
+- default/immutability of `globalJobParameters`, constructor copy semantics, null rejection
 - builder wiring (`builderWiresGlobalJobParameters_toRichMap`) and TRANSIENT survival
 - `createSerializer` round-trips for `String`, `Integer`, `Tuple2`
 - all accumulator methods throw with "permanently out of scope"

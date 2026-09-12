@@ -18,21 +18,25 @@ import java.util.Map;
  * and {@code currentWatermark()} work; register/delete throw UnsupportedOperationException
  * (matching Flink's non-keyed {@code ProcessOperator} behavior).
  */
-public final class ProcessFunctionHarness extends FunctionHarness {
+public final class ProcessFunctionHarness
+        extends AbstractRichFunctionHarness<ProcessFunction<Object, Object>> {
 
-    private final ProcessFunction<Object, Object> function;
     private final ProcessFunction<Object, Object>.Context context;
     private final List<Object> mainOutputs = new ArrayList<>();
     private final RecordingCollector<Object> mainCollector = new RecordingCollector<>(mainOutputs);
     private final Map<OutputTag<?>, List<Object>> sideOutputs = new LinkedHashMap<>();
 
+    public ProcessFunctionHarness(String id, ProcessFunction<?, ?> function) {
+        this(id, function, Map.of());
+    }
+
     /** Non-keyed functions get a query-only timer service, mirroring Flink where timers exist only
      * on keyed streams. Note {@code currentProcessingTime()} uses the wall clock, not the workflow
      * Clock — only the keyed service honors a custom clock. */
     @SuppressWarnings("unchecked")
-    public ProcessFunctionHarness(String id, ProcessFunction<?, ?> function) {
-        super(id);
-        this.function = (ProcessFunction<Object, Object>) function;
+    public ProcessFunctionHarness(
+            String id, ProcessFunction<?, ?> function, Map<String, String> globalJobParameters) {
+        super(id, (ProcessFunction<Object, Object>) function, globalJobParameters);
         final TimerService queryOnly = new TimerService() {
             @Override
             public long currentProcessingTime() {
@@ -64,7 +68,7 @@ public final class ProcessFunctionHarness extends FunctionHarness {
                 throw new UnsupportedOperationException(UNSUPPORTED_DELETE_TIMER_MSG);
             }
         };
-        this.context = this.function.new Context() {
+        this.context = getFunction().new Context() {
             @Override
             public Long timestamp() {
                 return null;
@@ -77,29 +81,24 @@ public final class ProcessFunctionHarness extends FunctionHarness {
 
             @Override
             public <X> void output(OutputTag<X> outputTag, X value) {
-                sideOutputs.computeIfAbsent(outputTag, t -> new ArrayList<>()).add(value);
+                sideOutputs.computeIfAbsent(outputTag, tag -> new ArrayList<>()).add(value);
             }
         };
     }
 
     /** Reuses the per-node output buffers, so they must be cleared before every invocation. */
     @Override
-    protected FunctionResult<?> invokeUnchecked(Object element) {
+    protected FunctionResult<?> processElement(Object element) {
         mainOutputs.clear();
         sideOutputs.clear();
         try {
-            function.processElement(element, context, mainCollector);
-        } catch (Exception e) {
-            throw new RuntimeException("processElement failed in " + getId(), e);
+            getFunction().processElement(element, context, mainCollector);
+        } catch (Exception exception) {
+            throw new RuntimeException("processElement failed in " + getId(), exception);
         }
         Map<OutputTag<?>, List<?>> sideCopy = new LinkedHashMap<>();
         sideOutputs.forEach((tag, list) -> sideCopy.put(tag, new ArrayList<>(list)));
         return new FunctionResult<>(List.copyOf(mainOutputs), sideCopy, metricsSnapshot());
-    }
-
-    @Override
-    public org.apache.flink.api.common.functions.RichFunction unwrap() {
-        return function;
     }
 
     @Override

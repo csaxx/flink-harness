@@ -12,13 +12,13 @@ clearing / TTL, it belongs here.
 - changing keyed state behavior or adding a state kind
 - debugging per-key isolation or "no bound key" failures
 - touching v2 `StateFuture` / `StateIterator` semantics
-- changing `clearState`/TRANSIENT behavior as it affects state
+- changing `resetState`/TRANSIENT behavior as it affects state
 - deciding what to do about State TTL
 
 ## Mental model
 
 ```
-FunctionHarness (one per node)
+AbstractRichFunctionHarness (one per node)
    └── StandaloneRuntimeContext
          └── InMemoryKeyedStateStore              one per node instance
                Map<Object key, Map<String stateName, Object value>>
@@ -37,12 +37,12 @@ user function.
 
 ## Scoping and key binding
 
-- `setCurrentKey(Object)` binds the key; `FunctionHarness` calls it before each
-  invocation (see `harnesses.md`).
+- `setCurrentKey(Object)` binds the key; `AbstractRichFunctionHarness` calls it before
+  each invocation (see `harnesses.md`).
 - All operations call `backing()`, which throws
   `IllegalStateException("Keyed state accessed with no bound key …")` when no key is
   bound. Creating a handle does **not** require a key; only using it does.
-- State is scoped by `(node instance, key, state name)`. Each `FunctionHarness` has its
+- State is scoped by `(node instance, key, state name)`. Each harness has its
   own store, so two nodes with the same state name do not collide.
 - v1 and v2 states with the same id are isolated by the `"v2:"` prefix (proved by
   `v1AndV2SameStateIdAreIsolated`).
@@ -104,8 +104,8 @@ v2 intentionally has **stronger null/copy semantics** than v1:
 - `FunctionHarness.open()` may register state handles; lazy open binds the first key
   first, eager open (`initializeAtBuild()`) binds a dummy placeholder key so handle
   registration cannot fail (`harnesses.md`).
-- `clearState(nodeId)` / `clearStateAll()` call `InMemoryKeyedStateStore.clearAll()`
-  and null the current key. For a `KeyedProcessFunctionHarness`, `clearState` also
+- `resetState(nodeId)` / `resetStateAll()` call `InMemoryKeyedStateStore.clearAll()`
+  and null the current key. For a `KeyedProcessFunctionHarness`, `resetState` also
   clears the timer heap (`timers.md`).
 - `Mode.TRANSIENT` invokes the same clear after every `process()` call; `Mode.CONTINUOUS`
   retains state until explicitly cleared.
@@ -151,7 +151,7 @@ v2 intentionally has **stronger null/copy semantics** than v1:
 - **Caching the current map.** The key changes between invocations; always resolve lazily.
 - **Expecting serialization/copies.** Mutating a stored object mutates state.
 - **Exposing `clearCurrentKey` to the workflow API** without considering that
-  `clearState` is defined as whole-node clearing.
+  `resetState` is defined as whole-node clearing.
 - **Calling state in `open()` without a key** when the node was not eagerly opened and
   no element has arrived — the lazy path only exists because the first element binds
   the key.
@@ -178,17 +178,17 @@ No test covers v1 TTL being ignored — record that as a gap if you touch TTL.
 |---|---|
 | `IllegalStateException: … no bound key` | edge not keyed; state used outside an invocation; eager dummy key only at open |
 | state bleeds across keys | a handle cached a map instead of `backing()` |
-| state bleeds across nodes | shared store (should be per `FunctionHarness`) |
+| state bleeds across nodes | shared store (should be per harness) |
 | v1 and v2 same name collide | `"v2:"` prefix removed |
 | TTL descriptor accepted | v1 path — TTL is only checked for v2 |
-| state not reset in tests | CONTINUOUS mode; call `clearState` or use TRANSIENT |
+| state not reset in tests | CONTINUOUS mode; call `resetState` or use TRANSIENT |
 
 ## Related agent references
 
 - [runtime-context.md](./runtime-context.md) — the `get*State` entry points.
 - [harnesses.md](./harnesses.md) — key binding and open lifecycle.
 - [timers.md](./timers.md) — timers are cleared together with keyed state.
-- [workflow.md](./workflow.md) — `clearState`/TRANSIENT orchestration.
+- [workflow.md](./workflow.md) — `resetState`/TRANSIENT orchestration.
 - [testing.md](./testing.md) — which tests establish state semantics.
 
 ## External references

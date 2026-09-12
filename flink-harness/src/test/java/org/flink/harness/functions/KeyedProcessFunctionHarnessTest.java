@@ -29,10 +29,10 @@ class KeyedProcessFunctionHarnessTest {
         };
         Edge edge = new Edge("src", "count", selector);
 
-        FunctionResult<?> r1 = harness.processViaEdge("apple", edge);
-        FunctionResult<?> r2 = harness.processViaEdge("apricot", edge);
-        FunctionResult<?> r3 = harness.processViaEdge("banana", edge);
-        FunctionResult<?> r4 = harness.processViaEdge("apple", edge);
+        FunctionResult<?> r1 = harness.processElement("apple", edge);
+        FunctionResult<?> r2 = harness.processElement("apricot", edge);
+        FunctionResult<?> r3 = harness.processElement("banana", edge);
+        FunctionResult<?> r4 = harness.processElement("apple", edge);
 
         assertThat((List<Object>) r1.outputs()).containsExactly("apple\u2192key=a\u2192count=1");
         assertThat((List<Object>) r2.outputs()).containsExactly("apricot\u2192key=a\u2192count=2");
@@ -45,7 +45,7 @@ class KeyedProcessFunctionHarnessTest {
         CountingKeyFn fn = new CountingKeyFn();
         KeyedProcessFunctionHarness harness = new KeyedProcessFunctionHarness("count", fn);
         try {
-            harness.processViaEdge("apple", null);
+            harness.processElement("apple", null);
         } catch (RuntimeException e) {
             assertThat(e).hasMessageContaining("failed");
             return;

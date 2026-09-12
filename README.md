@@ -93,8 +93,8 @@ new WorkflowBuilder(Mode.CONTINUOUS)
 ### Modes
 
 - **`CONTINUOUS`** — metrics and state accumulate across `process()` calls (like real Flink).
-  Manually reset with `clearState(nodeId)` / `clearStateAll()` / `clearMetrics(nodeId)` /
-  `clearMetricsAll()`.
+  Manually reset with `resetState(nodeId)` / `resetStateAll()` / `resetMetrics(nodeId)` /
+  `resetMetricsAll()`.
 - **`TRANSIENT`** — everything (state, metrics, counters) is cleared after each `process()` call,
   even on exception (via try/finally inside the lock).
 
@@ -238,10 +238,11 @@ WorkflowBuilder — typed edges, key selectors, type validation
         ▼
 StandaloneWorkflow — BFS execution, locking, mode management
   ├── NodeHarness implementations
-  │     ├── FunctionHarness        → wraps RichFunction, wires RuntimeContext + keyed state
-  │     │     ├── ProcessFunctionHarness
-  │     │     ├── KeyedProcessFunctionHarness
-  │     │     └── RichFunctionHarness (Map/FlatMap/Filter)
+  │     ├── FunctionHarness        → wraps RichFunction: lifecycle, RuntimeContext, metrics
+  │     │     └── AbstractRichFunctionHarness → key binding + keyed state on keyed edges
+  │     │           ├── ProcessFunctionHarness
+  │     │           ├── KeyedProcessFunctionHarness
+  │     │           └── RichMap/FlatMap/FilterFunctionHarness
   │     ├── StandaloneSource       → synthetic source node
   │     └── StandaloneSink         → synthetic terminal node
   ├── StandaloneRuntimeContext     → metrics group + InMemoryKeyedStateStore

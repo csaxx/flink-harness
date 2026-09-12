@@ -290,9 +290,9 @@ public final class WorkflowBuilder {
         // 1. build harnesses for Flink functions
         Map<String, NodeHarness> nodes = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : functions.entrySet()) {
-            FunctionHarness h = HarnessFactory.create(entry.getKey(), entry.getValue(), clock, mode);
-            h.setGlobalJobParameters(globalJobParameters);
-            nodes.put(entry.getKey(), h);
+            FunctionHarness<?> functionHarness = HarnessFactory.create(
+                    entry.getKey(), entry.getValue(), clock, mode, globalJobParameters);
+            nodes.put(entry.getKey(), functionHarness);
         }
 
         // 2. add sources and sinks directly
@@ -308,8 +308,8 @@ public final class WorkflowBuilder {
 
         // 4. edge type validation
         for (Edge edge : edges) {
-            NodeHarness src = requireNode(nodes, edge.src());
-            NodeHarness dst = requireNode(nodes, edge.dst());
+            NodeHarness srcHarness = requireNode(nodes, edge.src());
+            NodeHarness dstHarness = requireNode(nodes, edge.dst());
 
             TypeInformation<?> srcOut = outputTypes.get(edge.src());
             TypeInformation<?> dstIn = inputTypes.get(edge.dst());
@@ -344,7 +344,7 @@ public final class WorkflowBuilder {
             }
 
             // a keyed function is meaningless without a key selector on every inbound edge
-            if (dst.requiresKeyedEdge() && !edge.keyed()) {
+            if (dstHarness.requiresKeyedEdge() && !edge.keyed()) {
                 throw new IllegalStateException(
                         "KeyedProcessFunction " + edge.dst() + " received unkeyed edge from " + edge.src());
             }
@@ -353,7 +353,7 @@ public final class WorkflowBuilder {
         // eager open turns open() failures into build-time failures
         if (eagerInit) {
             for (NodeHarness node : nodes.values()) {
-                node.openOnceEager();
+                node.open();
             }
         }
 
@@ -414,11 +414,11 @@ public final class WorkflowBuilder {
     }
 
     private static NodeHarness requireNode(Map<String, NodeHarness> nodes, String id) {
-        NodeHarness n = nodes.get(id);
-        if (n == null) {
+        NodeHarness nodeHarness = nodes.get(id);
+        if (nodeHarness == null) {
             throw new IllegalStateException("unknown node id: " + id);
         }
-        return n;
+        return nodeHarness;
     }
 
     /** Builds the introspection-only DAG exposed by {@code getWorkflow()}; successors come from edges. */
@@ -439,7 +439,7 @@ public final class WorkflowBuilder {
         return result;
     }
 
-    private static String typeName(TypeInformation<?> t) {
-        return t == null ? WorkflowNode.UNKNOWN_TYPE : t.toString();
+    private static String typeName(TypeInformation<?> typeInfo) {
+        return typeInfo == null ? WorkflowNode.UNKNOWN_TYPE : typeInfo.toString();
     }
 }

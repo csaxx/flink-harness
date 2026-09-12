@@ -22,7 +22,7 @@ alters how elements move or how results are produced, it belongs here.
 builder phase (single-threaded, no side effects):        run phase (under workflow lock):
   registerFunction/KeyedFunction ─┐                        process(inputs, sourceId)
   addSource/addSink ──────────────┤                          └─ BFS Deque<Invocation>
-  addEdge/addKeyedEdge/… ─────────┤                              node.processViaEdge(elem, edge)
+  addEdge/addKeyedEdge/… ─────────┤                              node.processElement(elem, edge)
   build() ── validate ── open? ───┘                              → route outputs onto outbound edges
                                                                  → sinks' outputs collected
                                                                  → timers fired (mode dependent)
@@ -87,8 +87,9 @@ when no `TypeInformation` hint was supplied. The runtime dispatching is done via
 
 1. `Mode.TRANSIENT` with any timer mode other than `OPPORTUNISTIC` → `IllegalStateException`.
 2. `BACKGROUND` without a `BackgroundTimerListener` → `IllegalStateException`.
-3. Create harnesses for all registered functions via `HarnessFactory.create(id, fn, clock, mode)`
-   and wire `globalJobParameters`. Unsupported function types throw here
+3. Create harnesses for all registered functions via
+   `HarnessFactory.create(id, fn, clock, mode, globalJobParameters)` (params are
+   constructor-injected). Unsupported function types throw here
    (`IllegalArgumentException`; see `harnesses.md`).
 4. Add sources and sinks to the node map directly (they are already `NodeHarness`).
 5. `validateTopology`: a SOURCE may not receive inbound edges; a SINK may not have
@@ -100,7 +101,7 @@ when no `TypeInformation` hint was supplied. The runtime dispatching is done via
      must be equal; if either is unknown it fails unless opted out.
    - a destination whose harness `requiresKeyedEdge()` (i.e. `KeyedProcessFunction`)
      must receive a `keyed()` edge.
-7. If `initializeAtBuild()`, `openOnceEager()` each node.
+7. If `initializeAtBuild()`, `open()` each node.
 8. Build the `WorkflowNode` graph and collect keyed harnesses for timer management.
 
 Type hints come only from `TypeInformation` passed at registration. There is **no
@@ -119,7 +120,7 @@ not at build.
   registered sources), enqueues one `Invocation(sourceId, element, null)` per input,
   and drains. `Invocation` = `(functionId, element, inboundEdge)`.
 - `drainBfsQueue` (MANUAL/BACKGROUND and non-opportunistic phases): poll one
-  invocation → `node.processViaEdge(element, inboundEdge)` → if the node is a sink,
+  invocation → `node.processElement(element, inboundEdge)` → if the node is a sink,
   append its outputs to the per-sink accumulator → `routeResult` enqueues downstream
   invocations. It is a FIFO BFS: fan-out preserves parent order, multiple roots are
   interleaved breadth-first.
@@ -164,11 +165,11 @@ not at build.
 ## Threading / lifecycle
 
 - One `ReentrantLock` per `StandaloneWorkflow` guards `process`, `fireProcessingTimers`,
-  `clearState*`, `clearMetrics*`, and `close`. Separate workflows do not contend.
+  `resetState*`, `resetMetrics*`, and `close`. Separate workflows do not contend.
 - `close()` is idempotent (guarded by a `closed` flag): stops the background timer
   thread if present, then calls `close()` on every node. Nodes opened lazily are
   closed only if they were opened (`FunctionHarness.close` checks `opened`).
-- Direct `NodeHarness.processViaEdge` calls bypass the lock by design; the workflow is
+- Direct `NodeHarness.processElement` calls bypass the lock by design; the workflow is
   the only supported concurrent entry point.
 - `checkFailed()` runs at the start of every locked operation and rethrows a background
   timer thread failure, permanently poisoning the workflow (see `timers.md`).
@@ -238,7 +239,7 @@ not at build.
   passes, eager init open failure surfaces at build.
 - `flink-test/src/test/java/org/flink/test/DemoFunctionsTest` and
   `flink-standalone/src/test/java/org/flink/standalone/StandaloneRunnerTest` — the
-  end-to-end DAG, including `getWorkflow()` successors/kinds and clearState/metrics.
+  end-to-end DAG, including `getWorkflow()` successors/kinds and resetState/metrics.
 
 Run: `mvn -pl flink-harness -q test` (library), `mvn -q verify` (all modules).
 
@@ -252,12 +253,12 @@ Run: `mvn -pl flink-harness -q test` (library), `mvn -q verify` (all modules).
 | `KeyedProcessFunction … unkeyed edge` | edge was added with `addEdge`, not `addKeyedEdge` |
 | intermediate output absent from result | by design — only sinks collected |
 | side outputs not in result | by design — route them to a sink and read its outputs |
-| counts not reset in CONTINUOUS | call `clearState`/`clearMetrics`, or use TRANSIENT |
+| counts not reset in CONTINUOUS | call `resetState`/`resetMetrics`, or use TRANSIENT |
 
 ## Related agent references
 
-- [harnesses.md](./harnesses.md) — what `processViaEdge`/`openOnceEager` actually do.
-- [state.md](./state.md) — how key binding and `clearState` interact with this loop.
+- [harnesses.md](./harnesses.md) — what `processElement`/`open` actually do.
+- [state.md](./state.md) — how key binding and `resetState` interact with this loop.
 - [timers.md](./timers.md) — how the OPPORTUNISTIC loop and workflow-level firing work.
 - [metrics.md](./metrics.md) — the aggregation contract of `WorkflowResult`.
 - [runtime-context.md](./runtime-context.md) — the context handed to each function.

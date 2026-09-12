@@ -6,6 +6,7 @@ import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.Meter;
 import org.apache.flink.metrics.Metric;
 import org.apache.flink.util.clock.Clock;
+import org.flink.harness.graph.function.FunctionHarness;
 import org.flink.harness.graph.function.KeyedProcessFunctionHarness;
 import org.flink.harness.graph.function.NodeHarness;
 import org.flink.harness.metrics.StandaloneMetricGroup;
@@ -31,7 +32,7 @@ import java.util.concurrent.locks.ReentrantLock;
  * {@code process(inputs, sourceId)} runs elements through the graph starting at a source node.
  * See AGENTS.md for semantics.
  *
- * <p>Thread-safe by design: the entire {@link #process} call (and all clear/close operations)
+ * <p>Thread-safe by design: the entire {@link #process} call (and all reset/close operations)
  * is guarded by a single lock. Concurrent {@code process} invocations serialize on the same
  * workflow; separate workflow instances run without contention.
  *
@@ -169,7 +170,7 @@ public final class StandaloneWorkflow {
                 throw new IllegalStateException("unknown node id: " + inv.functionId());
             }
 
-            FunctionResult<?> result = node.processViaEdge(inv.element(), inv.inboundEdge());
+            FunctionResult<?> result = node.processElement(inv.element(), inv.inboundEdge());
 
             if (sinkIds.contains(inv.functionId())) {
                 outputsAgg.computeIfAbsent(inv.functionId(), k -> new ArrayList<>())
@@ -194,7 +195,7 @@ public final class StandaloneWorkflow {
                 throw new IllegalStateException("unknown node id: " + inv.functionId());
             }
 
-            FunctionResult<?> result = node.processViaEdge(inv.element(), inv.inboundEdge());
+            FunctionResult<?> result = node.processElement(inv.element(), inv.inboundEdge());
 
             if (sinkIds.contains(inv.functionId())) {
                 outputsAgg.computeIfAbsent(inv.functionId(), k -> new ArrayList<>())
@@ -208,17 +209,17 @@ public final class StandaloneWorkflow {
             // keep draining anything the timers just produced (including further timer firings)
             while (!queue.isEmpty()) {
                 Invocation nxt = queue.poll();
-                NodeHarness n = nodes.get(nxt.functionId());
-                if (n == null) throw new IllegalStateException("unknown node id: " + nxt.functionId());
+                NodeHarness nextHarness = nodes.get(nxt.functionId());
+                if (nextHarness == null) throw new IllegalStateException("unknown node id: " + nxt.functionId());
 
-                FunctionResult<?> nr = n.processViaEdge(nxt.element(), nxt.inboundEdge());
+                FunctionResult<?> nextResult = nextHarness.processElement(nxt.element(), nxt.inboundEdge());
 
                 if (sinkIds.contains(nxt.functionId())) {
                     outputsAgg.computeIfAbsent(nxt.functionId(), k -> new ArrayList<>())
-                            .addAll(nr.outputs());
+                            .addAll(nextResult.outputs());
                 }
 
-                routeResult(nxt.functionId(), nr, queue);
+                routeResult(nxt.functionId(), nextResult, queue);
 
                 fireDueTimers(clock.absoluteTimeMillis(), queue);
             }
@@ -269,7 +270,7 @@ public final class StandaloneWorkflow {
                 if (node == null) {
                     throw new IllegalStateException("unknown node id: " + inv.functionId());
                 }
-                FunctionResult<?> result = node.processViaEdge(inv.element(), inv.inboundEdge());
+                FunctionResult<?> result = node.processElement(inv.element(), inv.inboundEdge());
 
                 if (sinkIds.contains(inv.functionId())) {
                     outputsAgg.computeIfAbsent(inv.functionId(), k -> new ArrayList<>())
@@ -304,8 +305,8 @@ public final class StandaloneWorkflow {
 
     private long pendingTimerCountInternal() {
         long total = 0;
-        for (KeyedProcessFunctionHarness h : keyedHarnesses) {
-            total += h.timerHeapSize();
+        for (KeyedProcessFunctionHarness keyedHarness : keyedHarnesses) {
+            total += keyedHarness.timerHeapSize();
         }
         return total;
     }
@@ -360,7 +361,7 @@ public final class StandaloneWorkflow {
     }
 
     private Map<String, Metric> metricInstances(NodeHarness node) {
-        return ((StandaloneMetricGroup) node.unwrapMetricGroup()).metricInstances();
+        return ((StandaloneMetricGroup) node.metricGroup()).metricInstances();
     }
 
     // --------------------------------------------------------------------------------------------
@@ -405,12 +406,17 @@ public final class StandaloneWorkflow {
         return sinkIds;
     }
 
+    /** Returns the wrapped Flink function for function nodes, or the node itself for
+     * synthetic source/sink nodes. */
     public Object getNode(String id) {
-        NodeHarness n = nodes.get(id);
-        if (n == null) {
+        NodeHarness nodeHarness = nodes.get(id);
+        if (nodeHarness == null) {
             throw new IllegalStateException("unknown node id: " + id);
         }
-        return n.unwrap();
+        if (nodeHarness instanceof FunctionHarness<?> functionHarness) {
+            return functionHarness.getFunction();
+        }
+        return nodeHarness;
     }
 
     public List<WorkflowNode> getWorkflow() {
@@ -421,48 +427,48 @@ public final class StandaloneWorkflow {
     // global state / metrics management
     // --------------------------------------------------------------------------------------------
 
-    public void clearState(String nodeId) {
+    public void resetState(String nodeId) {
         lock.lock();
         try {
-            require(nodeId).clearState();
+            require(nodeId).resetState();
         } finally {
             lock.unlock();
         }
     }
 
-    public void clearStateAll() {
+    public void resetStateAll() {
         lock.lock();
         try {
-            nodes.values().forEach(NodeHarness::clearState);
+            nodes.values().forEach(NodeHarness::resetState);
         } finally {
             lock.unlock();
         }
     }
 
-    public void clearMetrics(String nodeId) {
+    public void resetMetrics(String nodeId) {
         lock.lock();
         try {
-            require(nodeId).clearMetrics();
+            require(nodeId).resetMetrics();
         } finally {
             lock.unlock();
         }
     }
 
-    public void clearMetricsAll() {
+    public void resetMetricsAll() {
         lock.lock();
         try {
-            nodes.values().forEach(NodeHarness::clearMetrics);
+            nodes.values().forEach(NodeHarness::resetMetrics);
         } finally {
             lock.unlock();
         }
     }
 
     private NodeHarness require(String id) {
-        NodeHarness n = nodes.get(id);
-        if (n == null) {
+        NodeHarness nodeHarness = nodes.get(id);
+        if (nodeHarness == null) {
             throw new IllegalStateException("unknown node id: " + id);
         }
-        return n;
+        return nodeHarness;
     }
 
     // --------------------------------------------------------------------------------------------

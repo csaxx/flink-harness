@@ -126,7 +126,7 @@ list state identical, so this is cheap.
 **Implementation.** `FunctionInitializationContext` backed by an in-memory
 `OperatorStateStore` (list/union-list/broadcast state) + `KeyedStateStore`
 delegating to `InMemoryKeyedStateStore`. `initializeState` called during
-`openOnce`. `snapshotState` invoked via explicit
+`open`. `snapshotState` invoked via explicit
 `StandaloneWorkflow.snapshotState()` hook (no persistence — returns per-function
 success; lets tests exercise snapshot logic). No savepoint serialization —
 documented.

@@ -7,33 +7,36 @@ import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.clock.Clock;
-import org.apache.flink.util.clock.SystemClock;
 import org.flink.harness.Mode;
+
+import java.util.Map;
 
 public final class HarnessFactory {
 
-    public static FunctionHarness create(String id, Object function) {
-        return create(id, function, SystemClock.getInstance(), Mode.CONTINUOUS);
-    }
-
     /** Single dispatch point from a user function instance to its harness. Keyed functions only
      * accept timer registration in CONTINUOUS mode; anything unsupported fails here at build time. */
-    public static FunctionHarness create(String id, Object function, Clock clock, Mode mode) {
-        if (function instanceof ProcessFunction<?, ?> p) {
-            return new ProcessFunctionHarness(id, p);
+    public static FunctionHarness<?> create(
+            String id,
+            Object function,
+            Clock clock,
+            Mode mode,
+            Map<String, String> globalJobParameters) {
+        if (function instanceof ProcessFunction<?, ?> processFunction) {
+            return new ProcessFunctionHarness(id, processFunction, globalJobParameters);
         }
-        if (function instanceof KeyedProcessFunction<?, ?, ?> k) {
-            boolean allowTimers = mode == Mode.CONTINUOUS;
-            return new KeyedProcessFunctionHarness(id, k, clock, allowTimers);
+        if (function instanceof KeyedProcessFunction<?, ?, ?> keyedProcessFunction) {
+            boolean allowTimerRegistration = mode == Mode.CONTINUOUS;
+            return new KeyedProcessFunctionHarness(
+                    id, keyedProcessFunction, clock, allowTimerRegistration, globalJobParameters);
         }
-        if (function instanceof RichMapFunction<?, ?> m) {
-            return new RichFunctionHarness(id, m, RichFunctionHarness.Kind.MAP);
+        if (function instanceof RichMapFunction<?, ?> mapFunction) {
+            return new RichMapFunctionHarness(id, mapFunction, globalJobParameters);
         }
-        if (function instanceof RichFlatMapFunction<?, ?> f) {
-            return new RichFunctionHarness(id, f, RichFunctionHarness.Kind.FLATMAP);
+        if (function instanceof RichFlatMapFunction<?, ?> flatMapFunction) {
+            return new RichFlatMapFunctionHarness(id, flatMapFunction, globalJobParameters);
         }
-        if (function instanceof RichFilterFunction<?> f) {
-            return new RichFunctionHarness(id, f, RichFunctionHarness.Kind.FILTER);
+        if (function instanceof RichFilterFunction<?> filterFunction) {
+            return new RichFilterFunctionHarness(id, filterFunction, globalJobParameters);
         }
         if (function instanceof RichFunction) {
             throw new IllegalArgumentException(
