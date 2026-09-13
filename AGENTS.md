@@ -60,8 +60,9 @@ If you change any of these, update this section AND re-evaluate all code.
 - **`StreamNode`** interface (`org.flink.harness.graph`) consumed by `StandaloneWorkflow`. Implemented by:
   - `AbstractFunctionHarness<F extends Function>` (abstract) — wraps a constructor-injected Flink
     function (`getFunction()`) and owns the node identity. No lifecycle, no metrics.
-  - `AbstractSingleStreamFunctionHarness<F extends Function>` (abstract) — shared output buffer and
-    result assembly for the non-rich single-stream interfaces; one concrete per type:
+  - `AbstractSingleStreamFunctionHarness<F extends Function>` (abstract) — shared per-invocation
+    output buffer for the non-rich single-stream interfaces; each concrete owns its full
+    `invoke` body and result assembly. One concrete per type:
     `MapFunctionHarness`, `FlatMapFunctionHarness`, `FilterFunctionHarness`.
   - `AbstractRichFunctionHarness<F extends AbstractRichFunction>` (abstract) — adds the
     `RuntimeContext` wiring, open/close lifecycle, key binding, keyed-state scoping and the

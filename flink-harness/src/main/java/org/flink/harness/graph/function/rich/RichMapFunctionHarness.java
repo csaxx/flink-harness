@@ -28,7 +28,7 @@ public final class RichMapFunctionHarness
 
     /** Reuses the per-node output buffer, so it must be cleared before every invocation. */
     @Override
-    protected FunctionResult<?> processElement(Object element) {
+    protected FunctionResult<?> invoke(Object element) {
         outputs.clear();
         try {
             Object mapped = getFunction().map(element);

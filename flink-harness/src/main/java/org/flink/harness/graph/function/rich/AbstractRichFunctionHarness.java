@@ -114,7 +114,7 @@ public abstract class AbstractRichFunctionHarness<F extends AbstractRichFunction
     public FunctionResult<?> processElement(Object element, DataStreamEdge edge) {
         bindKey(element, edge);
         open();
-        return super.processElement(element, edge);
+        return invoke(element);
     }
 
     /** Confined raw cast for KeySelector invocation; failures identify the offending edge. */

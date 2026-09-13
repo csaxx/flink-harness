@@ -112,7 +112,7 @@ public final class KeyedProcessFunctionHarness
 
     /** Reuses the collector's per-node output buffer, so it must be cleared before every invocation. */
     @Override
-    protected FunctionResult<?> processElement(Object element) {
+    protected FunctionResult<?> invoke(Object element) {
         mainCollector.clear();
         sideOutputs.clear();
         try {

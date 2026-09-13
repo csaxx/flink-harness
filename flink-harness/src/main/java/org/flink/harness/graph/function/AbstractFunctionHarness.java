@@ -37,11 +37,13 @@ public abstract class AbstractFunctionHarness<F extends Function> implements Str
     }
 
     /** Per-element entry point: no lifecycle here — rich subtypes override to bind the
-     * edge key and open lazily before delegating to the same abstract invocation. */
+     * edge key and open lazily before delegating to the same abstract {@link #invoke}. */
     @Override
     public FunctionResult<?> processElement(Object element, DataStreamEdge edge) {
-        return processElement(element);
+        return invoke(element);
     }
 
-    protected abstract FunctionResult<?> processElement(Object element);
+    /** The single subtype-specific per-element body, already surrounded by whatever
+     * lifecycle the branch needs (rich) or not (non-rich). */
+    protected abstract FunctionResult<?> invoke(Object element);
 }

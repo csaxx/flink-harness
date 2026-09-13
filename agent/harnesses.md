@@ -24,7 +24,7 @@ emulated.
 StandaloneWorkflow
    └── StreamNode                        (only interface the workflow knows)
          ├── AbstractFunctionHarness<F extends Function>   (abstract; identity)
-         │     ├── AbstractSingleStreamFunctionHarness<F>   (abstract; output buffer + result assembly)
+         │     ├── AbstractSingleStreamFunctionHarness<F>   (abstract; output buffer)
          │     │     ├── MapFunctionHarness              (non-rich)
          │     │     ├── FlatMapFunctionHarness          (non-rich)
          │     │     └── FilterFunctionHarness           (non-rich)
@@ -71,9 +71,9 @@ the provided abstract classes.
 constructor-injected `function` (exposed via `getFunction()`). It mirrors Flink's plain
 `Function` interface, which has no `RuntimeContext` — so no lifecycle, no metrics. Its
 `processElement(element, edge)` simply delegates to the subtype-specific
-`processElement(element)`; the rich branch overrides the public method to add key
-binding, lazy open and metrics. `open()`/`close()`/`resetState()`/`resetMetrics()` stay
-`StreamNode` no-ops.
+`invoke(element)` hook; the rich branch overrides the public method to add key
+binding, lazy open and metrics before calling the same hook. `open()`/`close()`/
+`resetState()`/`resetMetrics()` stay `StreamNode` no-ops.
 
 The per-node metric group lives one level down, on `AbstractRichFunctionHarness` (not
 here), so that only functions with a `RuntimeContext` can report metrics — matching
@@ -87,11 +87,13 @@ metrics and the node's snapshot are always the same group.
 `flink-harness/src/main/java/org/flink/harness/graph/function/single/AbstractSingleStreamFunctionHarness.java`
 
 Abstract; one final concrete per interface (`MapFunctionHarness`,
-`FlatMapFunctionHarness`, `FilterFunctionHarness`). Shared machinery: a per-node
-`RecordingCollector` output buffer, and the `processElement(Object)` template —
-clear buffer → `invoke(element)` → immutable `FunctionResult`. The operation name
-(`"map"`/`"flatMap"`/`"filter"`) is constructor-injected and used for error
-wrapping (`RuntimeException("<op> failed in <id>")`), matching the rich variants.
+`FlatMapFunctionHarness`, `FilterFunctionHarness`). Supplies the shared per-node
+`RecordingCollector` output buffer; each concrete owns its full `invoke(element)` body
+— clear buffer → call the wrapped function → immutable `FunctionResult`. The error
+prefix (`"map"`/`"flatMap"`/`"filter"`) is a literal in each concrete, matching the
+rich variants' style (`RuntimeException("<op> failed in <id>")`). Every per-element
+call resolves from the public `processElement(element, edge)` straight to the
+concrete's `invoke` — no intermediate template.
 
 - `MapFunctionHarness`: `map(element)`; a `null` return produces no output (same
   deliberate deviation as the rich variant).
@@ -123,8 +125,8 @@ order — preserve it:
 2. `open()` — if not yet opened: `RichFunction.setRuntimeContext(runtimeContext)`
    then `RichFunction.open(OPEN_CONTEXT)` (a singleton empty `OpenContext`).
    Failure → `RuntimeException("open() failed for <id>")`.
-3. `processElement(element)` — subtype-specific (protected abstract), reached via
-   `super.processElement(element, edge)`.
+3. `invoke(element)` — the subtype-specific body (protected abstract), called directly
+   by the rich public entry (no `super` passthrough).
 
 Consequences of that ordering:
 

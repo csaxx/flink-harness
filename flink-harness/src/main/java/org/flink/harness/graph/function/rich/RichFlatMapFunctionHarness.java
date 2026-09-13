@@ -27,7 +27,7 @@ public final class RichFlatMapFunctionHarness
 
     /** Reuses the collector's per-node buffer, so it must be cleared before every invocation. */
     @Override
-    protected FunctionResult<?> processElement(Object element) {
+    protected FunctionResult<?> invoke(Object element) {
         collector.clear();
         try {
             getFunction().flatMap(element, collector);
