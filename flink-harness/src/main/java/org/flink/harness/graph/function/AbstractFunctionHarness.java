@@ -1,7 +1,7 @@
 package org.flink.harness.graph.function;
 
 import org.apache.flink.api.common.functions.Function;
-import org.flink.harness.graph.DataStreamEdge;
+import org.flink.harness.graph.StreamEdge;
 import org.flink.harness.graph.StreamNode;
 import org.flink.harness.graph.function.rich.AbstractRichFunctionHarness;
 import org.flink.harness.graph.function.single.AbstractSingleStreamFunctionHarness;
@@ -39,7 +39,7 @@ public abstract class AbstractFunctionHarness<F extends Function> implements Str
     /** Per-element entry point: no lifecycle here — rich subtypes override to bind the
      * edge key and open lazily before delegating to the same abstract {@link #invoke}. */
     @Override
-    public FunctionResult<?> processElement(Object element, DataStreamEdge edge) {
+    public FunctionResult<?> processElement(Object element, StreamEdge edge) {
         return invoke(element);
     }
 

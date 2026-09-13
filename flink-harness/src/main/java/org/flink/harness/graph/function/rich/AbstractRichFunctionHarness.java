@@ -3,8 +3,7 @@ package org.flink.harness.graph.function.rich;
 import org.apache.flink.api.common.functions.AbstractRichFunction;
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.java.functions.KeySelector;
-import org.apache.flink.metrics.MetricGroup;
-import org.flink.harness.graph.DataStreamEdge;
+import org.flink.harness.graph.StreamEdge;
 import org.flink.harness.graph.StandaloneRuntimeContext;
 import org.flink.harness.graph.function.AbstractFunctionHarness;
 import org.flink.harness.graph.result.FunctionResult;
@@ -80,7 +79,7 @@ public abstract class AbstractRichFunctionHarness<F extends AbstractRichFunction
 
     /** Wires the runtime context then opens the function exactly once. Called eagerly after
      * workflow construction when configured, and lazily from
-     * {@link #processElement(Object, DataStreamEdge)} while the flag is not yet set. On the
+     * {@link #processElement(Object, StreamEdge)} while the flag is not yet set. On the
      * lazy path the first element's key is already bound (see below), so open() may use
      * keyed state. */
     @Override
@@ -111,7 +110,7 @@ public abstract class AbstractRichFunctionHarness<F extends AbstractRichFunction
     /** Order matters: bind the key first so a lazy {@link #open()} observes the element's
      * key when registering state handles. */
     @Override
-    public FunctionResult<?> processElement(Object element, DataStreamEdge edge) {
+    public FunctionResult<?> processElement(Object element, StreamEdge edge) {
         bindKey(element, edge);
         open();
         return invoke(element);
@@ -119,7 +118,7 @@ public abstract class AbstractRichFunctionHarness<F extends AbstractRichFunction
 
     /** Confined raw cast for KeySelector invocation; failures identify the offending edge. */
     @SuppressWarnings("unchecked")
-    private void bindKey(Object element, DataStreamEdge edge) {
+    private void bindKey(Object element, StreamEdge edge) {
         if (edge != null && edge.keyed()) {
             try {
                 setCurrentKey(((KeySelector<Object, Object>) edge.keySelector()).getKey(element));

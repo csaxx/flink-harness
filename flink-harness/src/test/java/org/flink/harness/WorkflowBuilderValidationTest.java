@@ -4,6 +4,7 @@ import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
+import org.flink.harness.graph.WorkflowNode;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -62,8 +63,8 @@ class WorkflowBuilderValidationTest {
         lax.registerFunction("b", new Passive());
         lax.addEdge("a", "b");
         StandaloneWorkflow wf = lax.build(true);
-        assertThat(wf.getWorkflow()).hasSize(2);
-        assertThat(wf.getWorkflow().get(0).inputType()).isEqualTo(WorkflowNode.UNKNOWN_TYPE);
+        assertThat(wf.graph().workflowNodes()).hasSize(2);
+        assertThat(wf.graph().workflowNodes().get(0).inputType()).isEqualTo(WorkflowNode.UNKNOWN_TYPE);
     }
 
     @Test
@@ -73,7 +74,7 @@ class WorkflowBuilderValidationTest {
          .registerFunction("k", new KeyedFn());
         // eager init sets a dummy key for the keyed function at build() time
         StandaloneWorkflow wf = b.build(true);
-        assertThat(wf.getWorkflow()).hasSize(1);
+        assertThat(wf.graph().workflowNodes()).hasSize(1);
         wf.close(); // no exception → open succeeded
     }
 

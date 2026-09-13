@@ -1,7 +1,7 @@
 package org.flink.harness.graph.source;
 
 import org.apache.flink.util.Collector;
-import org.flink.harness.graph.DataStreamEdge;
+import org.flink.harness.graph.StreamEdge;
 import org.flink.harness.graph.StreamNode;
 import org.flink.harness.graph.RecordingCollector;
 import org.flink.harness.graph.result.FunctionResult;
@@ -35,7 +35,7 @@ public class StandaloneSource<IN, OUT> implements StreamNode {
     /** Per-input entry: cast to the declared input type, run {@link #process}, and
      * return the emitted elements. Lifecycle is the inherited no-op default. */
     @Override
-    public FunctionResult<?> processElement(Object element, DataStreamEdge inboundEdge) {
+    public FunctionResult<?> processElement(Object element, StreamEdge inboundEdge) {
         collector.clear();
         try {
             @SuppressWarnings("unchecked")

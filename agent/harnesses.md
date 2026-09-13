@@ -50,7 +50,7 @@ function, which has no `RuntimeContext`).
 
 `flink-harness/src/main/java/org/flink/harness/graph/StreamNode.java`
 
-- `FunctionResult<?> processElement(Object element, DataStreamEdge inboundEdge)` — invoke once
+- `FunctionResult<?> processElement(Object element, StreamEdge inboundEdge)` — invoke once
   for one inbound element; `inboundEdge` carries the key selector / side tag.
 - `open()` — default no-op; called eagerly at build time under `initializeAtBuild()`.
 - `close()`, `resetState()`, `resetMetrics()`, `resetAll()` (resetState+resetMetrics).

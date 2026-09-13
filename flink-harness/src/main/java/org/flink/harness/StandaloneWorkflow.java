@@ -6,9 +6,9 @@ import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.Meter;
 import org.apache.flink.metrics.Metric;
 import org.apache.flink.util.clock.Clock;
-import org.flink.harness.graph.DataStreamEdge;
+import org.flink.harness.graph.StreamEdge;
 import org.flink.harness.graph.StreamNode;
-import org.flink.harness.graph.function.AbstractFunctionHarness;
+import org.flink.harness.graph.WorkflowStreamGraph;
 import org.flink.harness.graph.function.rich.AbstractRichFunctionHarness;
 import org.flink.harness.graph.function.rich.KeyedProcessFunctionHarness;
 import org.flink.harness.graph.result.FunctionResult;
@@ -25,13 +25,16 @@ import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * Executable workflow graph built by {@link WorkflowBuilder}.
- * {@code process(inputs, sourceId)} runs elements through the graph starting at a source node.
- * See AGENTS.md for semantics.
+ * Executable workflow built by {@link WorkflowBuilder}.
+ * {@code process(inputs, sourceId)} runs elements through the {@link WorkflowStreamGraph}
+ * starting at a source node. See AGENTS.md for semantics.
+ *
+ * <p>Purely an execution engine: the graph layout (nodes, edges, types, validation) lives in
+ * {@link WorkflowStreamGraph}; this class owns routing, result aggregation, timers, locking
+ * and the CONTINUOUS/TRANSIENT lifecycle.
  *
  * <p>Thread-safe by design: the entire {@link #process} call (and all reset/close operations)
  * is guarded by a single lock. Concurrent {@code process} invocations serialize on the same
@@ -43,16 +46,10 @@ import java.util.concurrent.locks.ReentrantLock;
 public final class StandaloneWorkflow {
 
     private final ReentrantLock lock = new ReentrantLock();
-    private final Map<String, StreamNode> nodes;
-    private final List<DataStreamEdge> edges;
-    private final Map<String, List<DataStreamEdge>> outboundEdges;
-    private final Set<String> sourceIds;
-    private final Set<String> sinkIds;
+    private final WorkflowStreamGraph graph;
     private final Mode mode;
-    private final List<WorkflowNode> graph;
     private final Clock clock;
     private final ProcessingTimerMode timerMode;
-    private final List<KeyedProcessFunctionHarness> keyedHarnesses;
     private final WorkflowTimerService timerService;
     private final BackgroundTimerThread backgroundThread;
     private volatile boolean closed;
@@ -60,29 +57,15 @@ public final class StandaloneWorkflow {
     private volatile Throwable bgFailure;
 
     StandaloneWorkflow(
-            Map<String, StreamNode> nodes,
-            List<DataStreamEdge> edges,
-            Set<String> sourceIds,
-            Set<String> sinkIds,
+            WorkflowStreamGraph graph,
             Mode mode,
-            List<WorkflowNode> graph,
             Clock clock,
             ProcessingTimerMode timerMode,
-            List<KeyedProcessFunctionHarness> keyedHarnesses,
             BackgroundTimerListener bgListener) {
-        this.nodes = nodes;
-        this.edges = edges;
-        this.sourceIds = sourceIds;
-        this.sinkIds = sinkIds;
-        this.outboundEdges = new LinkedHashMap<>();
-        for (DataStreamEdge edge : edges) {
-            outboundEdges.computeIfAbsent(edge.src(), k -> new ArrayList<>()).add(edge);
-        }
-        this.mode = mode;
         this.graph = graph;
+        this.mode = mode;
         this.clock = clock;
         this.timerMode = timerMode;
-        this.keyedHarnesses = keyedHarnesses;
         this.timerService = new WorkflowTimerService(
                 this::fireProcessingTimersInternal, this::pendingTimerCountInternal);
 
@@ -108,7 +91,7 @@ public final class StandaloneWorkflow {
             if (queue.isEmpty()) {
                 return null;
             }
-            return drainBfsQueue(queue);
+            return drain(queue, false);
         } finally {
             lock.unlock();
         }
@@ -137,11 +120,15 @@ public final class StandaloneWorkflow {
         return timerService;
     }
 
+    public WorkflowStreamGraph graph() {
+        return graph;
+    }
+
     private WorkflowResult doProcess(List<?> inputs, String sourceId) {
         // every element starts as an invocation of the source node; the source is just a node
-        if (!sourceIds.contains(sourceId)) {
+        if (!graph.sourceIds().contains(sourceId)) {
             throw new IllegalArgumentException("unknown source id: " + sourceId
-                    + "; registered sources: " + sourceIds);
+                    + "; registered sources: " + graph.sourceIds());
         }
 
         Deque<Invocation> queue = new ArrayDeque<>();
@@ -149,93 +136,46 @@ public final class StandaloneWorkflow {
             queue.add(new Invocation(sourceId, input, null));
         }
 
-        if (timerMode == ProcessingTimerMode.OPPORTUNISTIC) {
-            return drainBfsQueueOpportunistic(queue);
-        }
-        return drainBfsQueue(queue);
+        return drain(queue, timerMode == ProcessingTimerMode.OPPORTUNISTIC);
     }
 
     // --------------------------------------------------------------------------------------------
     // BFS queue drainage
     // --------------------------------------------------------------------------------------------
 
-    /** FIFO breadth-first drain of the invocation queue. Only sink outputs are collected; every
-     * node's outputs are routed onward via {@link #routeResult}. */
-    private WorkflowResult drainBfsQueue(Deque<Invocation> queue) {
+    /** FIFO breadth-first drain of the invocation queue; the single drain path behind
+     * {@code process()}, explicit timer firing and background firing. When
+     * {@code opportunistic}, due timers fire after every element (and thus also after the
+     * queue drains), so timers scheduled in the past or by the element just processed run
+     * immediately. Only sink outputs are collected; every node's outputs are routed onward. */
+    private WorkflowResult drain(Deque<Invocation> queue, boolean opportunistic) {
         Map<String, List<Object>> outputsAgg = new LinkedHashMap<>();
-
         while (!queue.isEmpty()) {
-            Invocation inv = queue.poll();
-            StreamNode node = nodes.get(inv.functionId());
-            if (node == null) {
-                throw new IllegalStateException("unknown node id: " + inv.functionId());
+            step(queue.poll(), queue, outputsAgg);
+            if (opportunistic) {
+                fireDueTimers(clock.absoluteTimeMillis(), queue);
             }
-
-            FunctionResult<?> result = node.processElement(inv.element(), inv.inboundEdge());
-
-            if (sinkIds.contains(inv.functionId())) {
-                outputsAgg.computeIfAbsent(inv.functionId(), k -> new ArrayList<>())
-                        .addAll(result.outputs());
-            }
-
-            routeResult(inv.functionId(), result, queue);
         }
-
         return buildWorkflowResult(outputsAgg);
     }
 
-    /** OPPORTUNISTIC drain: fires due timers after every element so timers scheduled in the past
-     * (or by the element just processed) run immediately, without waiting for the queue to empty. */
-    private WorkflowResult drainBfsQueueOpportunistic(Deque<Invocation> queue) {
-        Map<String, List<Object>> outputsAgg = new LinkedHashMap<>();
+    /** One invocation: invoke the node, collect its outputs when it is a sink, route onward. */
+    private void step(Invocation inv, Deque<Invocation> queue, Map<String, List<Object>> outputsAgg) {
+        StreamNode node = graph.node(inv.functionId());
+        FunctionResult<?> result = node.processElement(inv.element(), inv.inboundEdge());
 
-        while (!queue.isEmpty()) {
-            Invocation inv = queue.poll();
-            StreamNode node = nodes.get(inv.functionId());
-            if (node == null) {
-                throw new IllegalStateException("unknown node id: " + inv.functionId());
-            }
-
-            FunctionResult<?> result = node.processElement(inv.element(), inv.inboundEdge());
-
-            if (sinkIds.contains(inv.functionId())) {
-                outputsAgg.computeIfAbsent(inv.functionId(), k -> new ArrayList<>())
-                        .addAll(result.outputs());
-            }
-
-            routeResult(inv.functionId(), result, queue);
-
-            fireDueTimers(clock.absoluteTimeMillis(), queue);
-
-            // keep draining anything the timers just produced (including further timer firings)
-            while (!queue.isEmpty()) {
-                Invocation nxt = queue.poll();
-                StreamNode nextNode = nodes.get(nxt.functionId());
-                if (nextNode == null) throw new IllegalStateException("unknown node id: " + nxt.functionId());
-
-                FunctionResult<?> nextResult = nextNode.processElement(nxt.element(), nxt.inboundEdge());
-
-                if (sinkIds.contains(nxt.functionId())) {
-                    outputsAgg.computeIfAbsent(nxt.functionId(), k -> new ArrayList<>())
-                            .addAll(nextResult.outputs());
-                }
-
-                routeResult(nxt.functionId(), nextResult, queue);
-
-                fireDueTimers(clock.absoluteTimeMillis(), queue);
-            }
-
-            fireDueTimers(clock.absoluteTimeMillis(), queue);
+        if (graph.sinkIds().contains(inv.functionId())) {
+            outputsAgg.computeIfAbsent(inv.functionId(), sinkId -> new ArrayList<>())
+                    .addAll(result.outputs());
         }
 
-        return buildWorkflowResult(outputsAgg);
+        routeResult(inv.functionId(), result, queue);
     }
 
     /** Sends a node's result along its outbound edges. A side output with no matching edge is
      * silently dropped; main-channel outputs from non-sink nodes are only used for routing. */
     private void routeResult(String srcId, FunctionResult<?> result, Deque<Invocation> queue) {
-        List<DataStreamEdge> outbound = outboundEdges.getOrDefault(srcId, List.of());
-        for (DataStreamEdge edge : outbound) {
+        for (StreamEdge edge : graph.outboundEdgesOf(srcId)) {
             List<?> transported;
             if (edge.sideChannel()) {
                 // side channel: only values the source explicitly emitted for this tag
@@ -264,23 +204,7 @@ public final class StandaloneWorkflow {
             checkFailed();
             Deque<Invocation> queue = new ArrayDeque<>();
             fireDueTimers(clock.absoluteTimeMillis(), queue);
-            Map<String, List<Object>> outputsAgg = new LinkedHashMap<>();
-            while (!queue.isEmpty()) {
-                Invocation inv = queue.poll();
-                StreamNode node = nodes.get(inv.functionId());
-                if (node == null) {
-                    throw new IllegalStateException("unknown node id: " + inv.functionId());
-                }
-                FunctionResult<?> result = node.processElement(inv.element(), inv.inboundEdge());
-
-                if (sinkIds.contains(inv.functionId())) {
-                    outputsAgg.computeIfAbsent(inv.functionId(), k -> new ArrayList<>())
-                            .addAll(result.outputs());
-                }
-
-                routeResult(inv.functionId(), result, queue);
-            }
-            return buildWorkflowResult(outputsAgg);
+            return drain(queue, false);
         } finally {
             lock.unlock();
         }
@@ -289,7 +213,7 @@ public final class StandaloneWorkflow {
     /** Polls every keyed harness for timers due at {@code now} and routes their outputs into the
      * same queue as element outputs, so timers can trigger downstream functions and sinks. */
     private void fireDueTimers(long now, Deque<Invocation> queue) {
-        for (KeyedProcessFunctionHarness harness : keyedHarnesses) {
+        for (KeyedProcessFunctionHarness harness : graph.keyedHarnesses()) {
             TimerHeap.TimerEntry entry;
             while ((entry = harness.timerHeap().pollDue(now)) != null) {
                 FunctionResult<?> result = harness.fireTimer(entry);
@@ -306,7 +230,7 @@ public final class StandaloneWorkflow {
 
     private long pendingTimerCountInternal() {
         long total = 0;
-        for (KeyedProcessFunctionHarness keyedHarness : keyedHarnesses) {
+        for (KeyedProcessFunctionHarness keyedHarness : graph.keyedHarnesses()) {
             total += keyedHarness.timerHeapSize();
         }
         return total;
@@ -323,7 +247,7 @@ public final class StandaloneWorkflow {
      * Called before the TRANSIENT reset, which is why TRANSIENT results still carry their metrics. */
     private WorkflowResult buildWorkflowResult(Map<String, List<Object>> outputsAgg) {
         Map<String, FunctionResult<Object>> results = new LinkedHashMap<>();
-        for (Map.Entry<String, StreamNode> entry : nodes.entrySet()) {
+        for (Map.Entry<String, StreamNode> entry : graph.nodes().entrySet()) {
             String id = entry.getKey();
             List<Object> outs = List.copyOf(outputsAgg.getOrDefault(id, List.of()));
             Map<String, Object> metricSnap = metricsOf(entry.getValue());
@@ -351,7 +275,7 @@ public final class StandaloneWorkflow {
      * node registration order; metric names collide across nodes by design (no node namespacing). */
     private Map<String, Object> aggregateAllMetrics() {
         Map<String, Object> aggregated = new LinkedHashMap<>();
-        for (StreamNode node : nodes.values()) {
+        for (StreamNode node : graph.nodes().values()) {
             if (!(node instanceof AbstractRichFunctionHarness<?> richHarness)) {
                 continue;
             }
@@ -397,42 +321,9 @@ public final class StandaloneWorkflow {
 
     /** TRANSIENT teardown, invoked from {@code process()} finally so it also runs when a run throws. */
     private void resetTransient() {
-        for (StreamNode node : nodes.values()) {
+        for (StreamNode node : graph.nodes().values()) {
             node.resetAll();
         }
-    }
-
-    // --------------------------------------------------------------------------------------------
-    // introspection
-    // --------------------------------------------------------------------------------------------
-
-    public Set<String> getNodeIds() {
-        return nodes.keySet();
-    }
-
-    public Set<String> getSourceIds() {
-        return sourceIds;
-    }
-
-    public Set<String> getSinkIds() {
-        return sinkIds;
-    }
-
-    /** Returns the wrapped Flink function for function nodes, or the node itself for
-     * synthetic source/sink nodes. */
-    public Object getNode(String id) {
-        StreamNode node = nodes.get(id);
-        if (node == null) {
-            throw new IllegalStateException("unknown node id: " + id);
-        }
-        if (node instanceof AbstractFunctionHarness<?> functionHarness) {
-            return functionHarness.getFunction();
-        }
-        return node;
-    }
-
-    public List<WorkflowNode> getWorkflow() {
-        return List.copyOf(graph);
     }
 
     // --------------------------------------------------------------------------------------------
@@ -442,7 +333,7 @@ public final class StandaloneWorkflow {
     public void resetState(String nodeId) {
         lock.lock();
         try {
-            require(nodeId).resetState();
+            graph.node(nodeId).resetState();
         } finally {
             lock.unlock();
         }
@@ -451,7 +342,7 @@ public final class StandaloneWorkflow {
     public void resetStateAll() {
         lock.lock();
         try {
-            nodes.values().forEach(StreamNode::resetState);
+            graph.nodes().values().forEach(StreamNode::resetState);
         } finally {
             lock.unlock();
         }
@@ -460,7 +351,7 @@ public final class StandaloneWorkflow {
     public void resetMetrics(String nodeId) {
         lock.lock();
         try {
-            require(nodeId).resetMetrics();
+            graph.node(nodeId).resetMetrics();
         } finally {
             lock.unlock();
         }
@@ -469,18 +360,10 @@ public final class StandaloneWorkflow {
     public void resetMetricsAll() {
         lock.lock();
         try {
-            nodes.values().forEach(StreamNode::resetMetrics);
+            graph.nodes().values().forEach(StreamNode::resetMetrics);
         } finally {
             lock.unlock();
         }
-    }
-
-    private StreamNode require(String id) {
-        StreamNode node = nodes.get(id);
-        if (node == null) {
-            throw new IllegalStateException("unknown node id: " + id);
-        }
-        return node;
     }
 
     // --------------------------------------------------------------------------------------------
@@ -497,7 +380,7 @@ public final class StandaloneWorkflow {
                 if (backgroundThread != null) {
                     backgroundThread.close();
                 }
-                nodes.values().forEach(StreamNode::close);
+                graph.nodes().values().forEach(StreamNode::close);
             }
         } finally {
             lock.unlock();
@@ -506,5 +389,5 @@ public final class StandaloneWorkflow {
 
     // --------------------------------------------------------------------------------------------
 
-    private record Invocation(String functionId, Object element, DataStreamEdge inboundEdge) {}
+    private record Invocation(String functionId, Object element, StreamEdge inboundEdge) {}
 }

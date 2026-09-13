@@ -21,12 +21,19 @@ alters how elements move or how results are produced, it belongs here.
 ```
 builder phase (single-threaded, no side effects):        run phase (under workflow lock):
   registerFunction ───────────────┐                        process(inputs, sourceId)
-  addSource/addSink ──────────────┤                          └─ BFS Deque<Invocation>
-  addEdge/addKeyedEdge/… ─────────┤                              node.processElement(elem, edge)
-  build() ── validate ── open? ───┘                              → route outputs onto outbound edges
-                                                                 → sinks' outputs collected
-                                                                 → timers fired (mode dependent)
+  addSource/addSink ──────────────┤                          └─ drain() — FIFO BFS
+  addEdge/addKeyedEdge/… ─────────┤                              step(): node.processElement(elem, edge)
+  build() ── WorkflowStreamGraph ─┘                              → route outputs onto outbound edges
+         .create() = validate       → openAll()? →                 → sinks' outputs collected
+         new StandaloneWorkflow(graph, …)                         → timers fired (mode dependent)
 ```
+
+`WorkflowStreamGraph` (`org.flink.harness.graph`) is the validated, immutable graph
+container: nodes, edges, source/sink ids and the `TypeInformation` hint maps. `create()`
+runs all structural validation, so an instance is always valid; it derives the
+outbound-edge index, the keyed-harness view and the serializable `WorkflowNode`
+projection. `StandaloneWorkflow` is execution-only and reaches all graph data through
+its `graph` field (public via `workflow.graph()`).
 
 ## WorkflowBuilder surface (actual)
 
@@ -57,7 +64,7 @@ Facts to preserve:
 - Node ids are unique across sources, functions, and sinks (`requireUnique`); a
   duplicate throws `IllegalArgumentException` immediately at registration.
 - Registration order is preserved (`LinkedHashMap`), which determines node order in
-  `getWorkflow()` and the order of gauge aggregation (see `metrics.md`).
+  `graph().workflowNodes()` and the order of gauge aggregation (see `metrics.md`).
 - `globalJobParameters` makes an immutable copy at registration (`Map.copyOf`).
 - `clock` and timer mode are build inputs; changing the clock after build is impossible.
 
@@ -66,12 +73,16 @@ Facts to preserve:
 `org.flink.harness.WorkflowNode` is an introspection-only record
 `(functionId, kind, inputType, outputType, successors)` with
 `Kind = SOURCE | FUNCTION | SINK`. `WorkflowNode.UNKNOWN_TYPE = "<unknown>"` is used
-when no `TypeInformation` hint was supplied. The runtime dispatching is done via
-`StreamNode`, not `WorkflowNode` (see `harnesses.md`).
+when no `TypeInformation` hint was supplied. It is a serializable projection derived by
+`WorkflowStreamGraph` (kind from the source/sink id sets, type names from the hint maps);
+the graph itself is not serializable (it holds live harnesses). The runtime dispatching
+is done via `StreamNode`, not `WorkflowNode` (see `harnesses.md`). The raw
+`TypeInformation` hints stay available on the graph (`inputTypes()/outputTypes()`) for
+typed introspection.
 
 ## Edge model
 
-`org.flink.harness.graph.DataStreamEdge` = `(src, dst, keySelector, sideTag)`:
+`org.flink.harness.graph.StreamEdge` = `(src, dst, keySelector, sideTag)`:
 
 - `keyed() == keySelector != null` — the destination binds the current key from the
   transported element before invoking the function.
@@ -91,18 +102,21 @@ when no `TypeInformation` hint was supplied. The runtime dispatching is done via
    `HarnessFactory.create(id, fn, clock, mode, globalJobParameters)` (params are
    constructor-injected). Unsupported function types throw here
    (`IllegalArgumentException`; see `harnesses.md`).
-4. Add sources and sinks to the node map directly (they are already `StreamNode`).
-5. `validateTopology`: a SOURCE may not receive inbound edges; a SINK may not have
-   outbound edges.
-6. Per-edge type + keyed validation:
-   - side-channel edge with a typed tag: tag type must equal the destination input type
-     when both are known; an untyped tag fails unless opted out.
-   - main edge: if both source output type and destination input type are known they
-     must be equal; if either is unknown it fails unless opted out.
-   - a destination whose harness `requiresKeyedEdge()` (i.e. `KeyedProcessFunction`)
-     must receive a `keyed()` edge.
-7. If `initializeAtBuild()`, `open()` each node.
-8. Build the `WorkflowNode` graph and collect keyed harnesses for timer management.
+4. Add sources and sinks to the node map (they are already `StreamNode`).
+5. `WorkflowStreamGraph.create(nodes, edges, sourceIds, sinkIds, inputTypes, outputTypes, optOut)`
+   runs all structural validation (a graph instance is therefore always valid):
+   a. topology: a SOURCE may not receive inbound edges; a SINK may not have outbound edges
+      (kinds derive from the source/sink id sets — there is no separate kind map);
+   b. per-edge, in edge registration order: unknown endpoint → `unknown node id`, then
+      type check, then keyed check:
+      - side-channel edge with a typed tag: tag type must equal the destination input type
+        when both are known; an untyped tag fails unless opted out.
+      - main edge: if both source output type and destination input type are known they
+        must be equal; if either is unknown it fails unless opted out.
+      - a destination whose harness `requiresKeyedEdge()` (i.e. `KeyedProcessFunction`)
+        must receive a `keyed()` edge.
+6. If `initializeAtBuild()`, `graph.openAll()` opens each node in registration order.
+7. `new StandaloneWorkflow(graph, mode, clock, timerMode, bgListener)`.
 
 Type hints come only from `TypeInformation` passed at registration. There is **no
 `TypeExtractor` inference** (older docs claimed this; it is false). With no hint,
@@ -119,20 +133,20 @@ not at build.
 - `doProcess` rejects unknown `sourceId` (`IllegalArgumentException` listing
   registered sources), enqueues one `Invocation(sourceId, element, null)` per input,
   and drains. `Invocation` = `(functionId, element, inboundEdge)`.
-- `drainBfsQueue` (MANUAL/BACKGROUND and non-opportunistic phases): poll one
-  invocation → `node.processElement(element, inboundEdge)` → if the node is a sink,
-  append its outputs to the per-sink accumulator → `routeResult` enqueues downstream
-  invocations. It is a FIFO BFS: fan-out preserves parent order, multiple roots are
-  interleaved breadth-first.
-- `routeResult(srcId, result, queue)`: for every outbound edge of `srcId`:
+- One drain path serves all callers: `drain(queue, opportunistic)` loops
+  `step(inv, queue, outputsAgg)` — poll one invocation → `graph.node(id).processElement(element, inboundEdge)`
+  → if the node is a sink, append its outputs to the per-sink accumulator →
+  `routeResult` enqueues downstream invocations. It is a FIFO BFS: fan-out preserves
+  parent order, multiple roots are interleaved breadth-first. When
+  `opportunistic` (timer mode OPPORTUNISTIC), due timers fire after every step, so
+  timers scheduled in the past or by the element just processed run immediately —
+  including a final fire when the queue empties. See `timers.md`.
+- `routeResult(srcId, result, queue)`: for every edge of `graph.outboundEdgesOf(srcId)`:
   - side channel: `result.sideOutputs().get(tag)`; if `null`, skip (the source did not
     emit that tag). Otherwise enqueue each element to `edge.dst()` with this edge.
   - main channel: enqueue `result.outputs()`.
   - A side output with **no** matching edge is silently dropped (it never reaches a
     result).
-- `OPPORTUNISTIC` uses `drainBfsQueueOpportunistic`, which fires due timers after each
-  processed element (and again after the queue drains) by appending timer outputs to
-  the same queue. See `timers.md`.
 
 ## Results
 
@@ -188,11 +202,13 @@ not at build.
 
 ## Important implementation patterns
 
-- Validation is ordered and eager at `build()`; prefer adding new checks there rather
-  than at run time.
+- Validation is ordered and runs inside `WorkflowStreamGraph.create()`; prefer adding
+  new structural checks there. Execution-config guards (mode/timer-mode) stay in
+  `WorkflowBuilder.build()` because they are not graph properties.
 - `StandaloneWorkflow` depends only on `StreamNode`, never on concrete harness types
-  except for timer collection (`KeyedProcessFunctionHarness`).
-- Prefer adding edge kinds as `DataStreamEdge` fields plus builder methods and updating
+  except for timer firing (`KeyedProcessFunctionHarness`, collected once by
+  `WorkflowStreamGraph.keyedHarnesses()`).
+- Prefer adding edge kinds as `StreamEdge` fields plus builder methods and updating
   `routeResult`; the record is the single source of routing truth.
 - Keep TRANSIENT reset centralized in `resetTransient()`.
 
@@ -213,12 +229,12 @@ not at build.
 - **Expecting intermediate outputs in the result.** Only sinks are collected.
 - **Relying on `WorkflowResult.sideOutputsOf`.** It is always empty; use a sink.
 - **Assuming `addSourceEdge` validates kinds.** It is just `addEdge`; real checks are
-  in `validateTopology`.
+  in `WorkflowStreamGraph.create()`.
 - **Forgetting the keyed-edge requirement** when registering a `KeyedProcessFunction`:
   build fails, and the message names the offending edge.
 - **Changing type validation defaults.** `build()` must stay strict; opt-out is explicit.
-- **Mutating the built graph.** Nodes/edges are captured at build; there is no
-  reconfiguration API.
+- **Mutating the built graph.** Structurally impossible: `WorkflowStreamGraph` exposes
+  only unmodifiable, insertion-ordered views and there is no reconfiguration API.
 - **Assuming element ordering is per-key.** It is global FIFO; key only controls state.
 - **Adding a mode without updating the TRANSIENT timer guard** in `build()` and
   `HarnessFactory`.
@@ -238,9 +254,14 @@ not at build.
 - `WorkflowBuilderValidationTest` — duplicate ids, unknown edge, type mismatch,
   unkeyed inbound edge to a keyed function, unresolved generics fail at build + opt-out
   passes, eager init open failure surfaces at build.
+- `org.flink.harness.graph.WorkflowStreamGraphTest` — the graph container itself:
+  immutability, registration order, outbound-edge grouping, keyed-harness filtering,
+  `node`/`unwrapped` semantics, type-hint maps, `WorkflowNode` projection, and
+  construction-time validation.
 - `flink-test/src/test/java/org/flink/test/DemoFunctionsTest` and
   `flink-standalone/src/test/java/org/flink/standalone/StandaloneRunnerTest` — the
-  end-to-end DAG, including `getWorkflow()` successors/kinds and resetState/metrics.
+  end-to-end DAG, including `graph().workflowNodes()` successors/kinds and
+  resetState/metrics.
 
 Run: `mvn -pl flink-harness -q test` (library), `mvn -q verify` (all modules).
 

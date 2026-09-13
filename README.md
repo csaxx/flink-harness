@@ -139,11 +139,13 @@ result.sideOutputsOf("fnId", tag) // convenience: List<Object>
 ### Workflow introspection
 
 ```java
-wf.getNodeIds();       // Set<String> — all nodes (sources, functions, sinks)
-wf.getSourceIds();     // Set<String>
-wf.getSinkIds();       // Set<String>
-wf.getNode("parse");   // original function/source/sink instance
-wf.getWorkflow();      // List<WorkflowNode> — serializable DAG with type info and successors
+wf.graph().nodes();            // Map<String, StreamNode> — all nodes (sources, functions, sinks)
+wf.graph().sourceIds();        // Set<String>
+wf.graph().sinkIds();          // Set<String>
+wf.graph().unwrapped("parse"); // original function/source/sink instance
+wf.graph().workflowNodes();    // List<WorkflowNode> — serializable DAG with type info and successors
+wf.graph().inputTypes();       // Map<String, TypeInformation<?>> — registration type hints
+wf.graph().outputTypes();      // Map<String, TypeInformation<?>>
 ```
 
 ### Thread safety
@@ -170,7 +172,7 @@ wf.close();  // calls close() on all nodes (idempotent, guarded by lock)
 | Side outputs (OutputTag) — routable to any node | ✔ |
 | Keyed state v1 (ValueState, ListState, MapState, ReducingState, AggregatingState) | ✔ in-memory per-key, no serialization |
 | StandaloneSource / StandaloneSink — subclassable, default passthrough | ✔ |
-| Side-channel edges (OutputTag on `DataStreamEdge`) — main/side routing via `sideTag == null` | ✔ |
+| Side-channel edges (OutputTag on `StreamEdge`) — main/side routing via `sideTag == null` | ✔ |
 | Timers / TimerService | ✔ three modes: OPPORTUNISTIC, MANUAL, BACKGROUND |
 | `createSerializer` | ✔ via `SerializerConfigImpl` |
 | `getGlobalJobParameters` | ✔ via `WorkflowBuilder.globalJobParameters(map)` |
@@ -210,7 +212,7 @@ Features **planned** for future versions:
 | Package | Audience |
 |---------|----------|
 | `org.flink.harness` | Consumer API — `WorkflowBuilder`, `StandaloneWorkflow`, `WorkflowNode`, `Mode` |
-| `org.flink.harness.graph` | Implementation — `StreamNode` (interface), `DataStreamEdge`, `StandaloneRuntimeContext`, `RecordingCollector` |
+| `org.flink.harness.graph` | Implementation — `StreamNode` (interface), `StreamEdge`, `StandaloneRuntimeContext`, `RecordingCollector` |
 | `org.flink.harness.graph.function[.single/.rich]` | Nodes — `AbstractFunctionHarness` + subtypes, `HarnessFactory` |
 | `org.flink.harness.graph.result` | `FunctionResult`, `WorkflowResult` — output containers |
 | `org.flink.harness.graph.source` | `StandaloneSource`, `JsonSource` — subclassable source base classes |

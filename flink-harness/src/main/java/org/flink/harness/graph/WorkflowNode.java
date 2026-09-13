@@ -1,4 +1,4 @@
-package org.flink.harness;
+package org.flink.harness.graph;
 
 import java.io.Serializable;
 import java.util.List;

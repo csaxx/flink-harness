@@ -2,7 +2,7 @@ package org.flink.standalone;
 
 import org.flink.harness.Mode;
 import org.flink.harness.StandaloneWorkflow;
-import org.flink.harness.WorkflowNode;
+import org.flink.harness.graph.WorkflowNode;
 import org.flink.harness.graph.result.WorkflowResult;
 import org.flink.test.DemoFunctions;
 import org.junit.jupiter.api.Test;
@@ -169,9 +169,9 @@ class StandaloneRunnerTest {
     }
 
     @Test
-    void getWorkflowReturnsDagWithTypesAndKinds() {
+    void workflowNodesReturnDagWithTypesAndKinds() {
         StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS);
-        var nodes = wf.getWorkflow();
+        var nodes = wf.graph().workflowNodes();
         // 10 nodes: csv(source) + parse/route/accum/report/shout(functions) + accumOut/reportOut/shoutOut/rejectedOut(sinks)
         assertThat(nodes).hasSize(10);
 
@@ -189,9 +189,9 @@ class StandaloneRunnerTest {
     }
 
     @Test
-    void getNodeIdsReturnsAllIds() {
+    void graphNodesContainAllIds() {
         StandaloneWorkflow wf = StandaloneRunner.buildWorkflow(Mode.CONTINUOUS);
-        assertThat(wf.getNodeIds()).containsExactlyInAnyOrder(
+        assertThat(wf.graph().nodes().keySet()).containsExactlyInAnyOrder(
                 "csv", "parse", "route", "accum", "report", "shout",
                 "accumOut", "reportOut", "shoutOut", "rejectedOut");
     }

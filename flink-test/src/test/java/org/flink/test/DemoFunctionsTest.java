@@ -2,7 +2,7 @@ package org.flink.test;
 
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.functions.KeySelector;
-import org.flink.harness.graph.DataStreamEdge;
+import org.flink.harness.graph.StreamEdge;
 import org.flink.harness.Mode;
 import org.flink.harness.StandaloneWorkflow;
 import org.flink.harness.WorkflowBuilder;
@@ -62,7 +62,7 @@ class DemoFunctionsTest {
     void accumulateFnAccumulatesPerCustomer() {
         KeyedProcessFunctionHarness harness = new KeyedProcessFunctionHarness("accum", new DemoFunctions.AccumulateFn());
         KeySelector<DemoFunctions.ParsedOrder, String> byCustomer = DemoFunctions.ParsedOrder::customer;
-        DataStreamEdge edge = new DataStreamEdge("src", "accum", byCustomer);
+        StreamEdge edge = new StreamEdge("src", "accum", byCustomer);
 
         DemoFunctions.ParsedOrder a = new DemoFunctions.ParsedOrder("c1", "p1", 2, 10.0);
         DemoFunctions.ParsedOrder b = new DemoFunctions.ParsedOrder("c1", "p2", 1, 20.0);

@@ -52,12 +52,17 @@ If you change any of these, update this section AND re-evaluate all code.
 | `getUserCodeClassLoader` | ✔ returns the harness classloader; `registerUserCodeClassLoaderReleaseHookIfAbsent` is a no-op |
 | StandaloneSource / StandaloneSink | ✔ concrete, subclassable, default passthrough |
 | JsonSource / JsonSink | ✔ convenience, Jackson-databind (provided scope) |
-| Side-channel edges (OutputTag on `DataStreamEdge`) | ✔ main/side output routing via `sideTag == null` |
+| Side-channel edges (OutputTag on `StreamEdge`) | ✔ main/side output routing via `sideTag == null` |
 | Non-rich single-stream functions (`MapFunction` / `FlatMapFunction` / `FilterFunction`) | ✔ implement (no lifecycle, no `RuntimeContext`, no keyed state — like Flink) |
 
 ### Harness approach
 
-- **`StreamNode`** interface (`org.flink.harness.graph`) consumed by `StandaloneWorkflow`. Implemented by:
+- **`StreamNode`** interface (`org.flink.harness.graph`) consumed by `StandaloneWorkflow` via
+  **`WorkflowStreamGraph`** — the validated, immutable graph container (nodes, edges, source/sink
+  ids, `TypeInformation` hints; runs all structural validation in `create()`; derives the
+  outbound-edge index, keyed-harness view and the serializable `WorkflowNode` projection).
+  `StandaloneWorkflow` is execution-only (routing, results, timers, locking, modes).
+  `StreamNode` is implemented by:
   - `AbstractFunctionHarness<F extends Function>` (abstract) — wraps a constructor-injected Flink
     function (`getFunction()`) and owns the node identity. No lifecycle, no metrics.
   - `AbstractSingleStreamFunctionHarness<F extends Function>` (abstract) — shared per-invocation
@@ -90,7 +95,7 @@ If you change any of these, update this section AND re-evaluate all code.
 - `TypeInformation` hints supplied at registration only — there is **no** `TypeExtractor` inference.
 - Unresolved edge types → **fail loudly at `build()`** unless opt out (`build(optOutTypeValidation=true)`).
 - Opt-out edges fall back to per-element `ClassCastException` naming the edge and function ids.
-- `getWorkflow()` returns DAG tuples annotated with resolved `TypeInformation` and `WorkflowNode.Kind` (SOURCE/FUNCTION/SINK).
+- `graph().workflowNodes()` returns DAG tuples annotated with resolved `TypeInformation` names and `WorkflowNode.Kind` (SOURCE/FUNCTION/SINK); the raw hints stay on the graph (`graph().inputTypes()/outputTypes()`).
 
 ### WorkflowBuilder surface (API)
 
@@ -171,7 +176,7 @@ All operators run with parallelism-1 semantics (single "subtask"). No key redist
 | Package | Audience |
 |---|---|
 | `org.flink.harness` | Consumer API — `WorkflowBuilder`, `StandaloneWorkflow`, `WorkflowNode`, `Mode` |
-| `org.flink.harness.graph` | Implementation — `StreamNode` (interface), `DataStreamEdge`, `StandaloneRuntimeContext`, `RecordingCollector` |
+| `org.flink.harness.graph` | Implementation — `WorkflowStreamGraph` (validated graph container), `StreamNode` (interface), `StreamEdge`, `StandaloneRuntimeContext`, `RecordingCollector` |
 | `org.flink.harness.graph.function[.single/.rich]` | Nodes — `AbstractFunctionHarness` → `AbstractSingleStreamFunctionHarness` / `AbstractRichFunctionHarness` → concrete harnesses, `HarnessFactory` (public, not API) |
 | `org.flink.harness.graph.result` | Results — `FunctionResult`, `WorkflowResult` |
 | `org.flink.harness.graph.source` | `StandaloneSource`, `JsonSource` — public API, subclassable |

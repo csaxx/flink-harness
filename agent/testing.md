@@ -56,6 +56,7 @@ Tests are the primary evidence for repository facts in the other `/agent` docs.
 |---|---|
 | `StandaloneWorkflowTest` | Multi-stage fan-out, keyed branch, side outputs to sink and to an intermediate function, custom source/sink transforms and filtering, multi-source/multi-sink, mode accumulation/reset, graph introspection (kinds/successors/types), metric aggregation (sum + gauge last-wins), and lock correctness under many concurrent `process()` calls (CONTINUOUS and TRANSIENT). |
 | `WorkflowBuilderValidationTest` | Duplicate id, unknown edge, type mismatch, unkeyed inbound edge to a keyed function, unresolved generics → fail at `build()` / pass with `build(true)`, `initializeAtBuild()` opens eagerly and surfaces `open()` failures at build time. |
+| `WorkflowStreamGraphTest` | The graph container itself: immutable + registration-ordered views, outbound-edge grouping, keyed-harness filtering, `node`/`unwrapped` semantics, `TypeInformation` hint maps, `WorkflowNode` projection (kinds/successors/`UNKNOWN_TYPE`), construction-time validation. |
 | `KeyedProcessFunctionHarnessTest` | Per-key state isolation and `ctx.getCurrentKey()`; a keyed function invoked with no keyed edge fails loudly. |
 | `ProcessFunctionHarnessTest` | Main + side output capture, metric snapshot after invocation, `resetAll()` zeroing built-in counters. |
 | `RichFunctionHarnessesTest` | Map null-drop, flatMap collector emissions, filter pass/drop, and keyed state in a `RichMapFunction` on a keyed edge (Flink-faithful keyed-state-for-rich-functions). |
@@ -84,7 +85,7 @@ fixture; `TestSmokeTest` is a no-op guard.
 
 | Test class | Proves |
 |---|---|
-| `StandaloneRunnerTest` | Full runner DAG: accum/report/shout/side outputs (shout proves a non-rich `MapFunction` in the integrated pipeline), per-node and aggregate metrics, CONTINUOUS accumulation, TRANSIENT reset, `resetState`, `resetStateAll`, `resetMetrics`, `getWorkflow()` kinds/successors, `getNodeIds()`, reading lines from a file. |
+| `StandaloneRunnerTest` | Full runner DAG: accum/report/shout/side outputs (shout proves a non-rich `MapFunction` in the integrated pipeline), per-node and aggregate metrics, CONTINUOUS accumulation, TRANSIENT reset, `resetState`, `resetStateAll`, `resetMetrics`, `graph().workflowNodes()` kinds/successors, `graph().nodes()` ids, reading lines from a file. |
 | `DependencyTreeTest` | Production dependency tree contains no `flink-test-utils`, `flink-clients`, `flink-runtime-test` (**Windows-only**, see caveats). |
 | `StandaloneSmokeTest` | Module loads. |
 

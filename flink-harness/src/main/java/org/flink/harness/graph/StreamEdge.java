@@ -7,9 +7,9 @@ import org.apache.flink.util.OutputTag;
  * Edge descriptor — source, destination, optional key selector, optional side-output tag.
  * {@code sideTag == null} means main output channel.
  */
-public record DataStreamEdge(String src, String dst, KeySelector<?, ?> keySelector, OutputTag<?> sideTag) {
+public record StreamEdge(String src, String dst, KeySelector<?, ?> keySelector, OutputTag<?> sideTag) {
 
-    public DataStreamEdge(String src, String dst, KeySelector<?, ?> keySelector) {
+    public StreamEdge(String src, String dst, KeySelector<?, ?> keySelector) {
         this(src, dst, keySelector, null);
     }
 

@@ -13,7 +13,7 @@ import org.flink.harness.graph.result.FunctionResult;
  */
 public interface StreamNode {
 
-    FunctionResult<?> processElement(Object element, DataStreamEdge inboundEdge);
+    FunctionResult<?> processElement(Object element, StreamEdge inboundEdge);
 
     /** Open eagerly at build time; no-op default for synthetic nodes. */
     default void open() {}

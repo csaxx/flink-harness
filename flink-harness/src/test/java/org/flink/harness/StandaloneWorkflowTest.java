@@ -11,6 +11,7 @@ import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.OutputTag;
+import org.flink.harness.graph.WorkflowNode;
 import org.flink.harness.graph.result.WorkflowResult;
 import org.flink.harness.graph.source.StandaloneSource;
 import org.flink.harness.graph.sink.StandaloneSink;
@@ -95,7 +96,7 @@ class StandaloneWorkflowTest {
     }
 
     @Test
-    void getWorkflowGraphReturnsTypesAndKindsAndSuccessors() {
+    void workflowNodesReturnTypesAndKindsAndSuccessors() {
         StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .addSource("in", TypeInformation.of(String.class))
                 .registerFunction("a", new UpperCase(),
@@ -108,7 +109,7 @@ class StandaloneWorkflowTest {
                 .addEdge("b", "out")
                 .build();
 
-        List<WorkflowNode> graph = wf.getWorkflow();
+        List<WorkflowNode> graph = wf.graph().workflowNodes();
         assertThat(graph).hasSize(4);
         WorkflowNode a = graph.stream().filter(n -> n.functionId().equals("a")).findFirst().orElseThrow();
         assertThat(a.successors()).containsExactly("b");

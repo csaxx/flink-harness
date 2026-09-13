@@ -7,14 +7,12 @@ import org.apache.flink.streaming.api.functions.KeyedProcessFunction;
 import org.apache.flink.util.OutputTag;
 import org.apache.flink.util.clock.Clock;
 import org.apache.flink.util.clock.SystemClock;
-import org.flink.harness.graph.DataStreamEdge;
+import org.flink.harness.graph.StreamEdge;
 import org.flink.harness.graph.StreamNode;
-import org.flink.harness.graph.function.AbstractFunctionHarness;
+import org.flink.harness.graph.WorkflowStreamGraph;
 import org.flink.harness.graph.function.HarnessFactory;
-import org.flink.harness.graph.function.rich.KeyedProcessFunctionHarness;
 import org.flink.harness.graph.source.StandaloneSource;
 import org.flink.harness.graph.sink.StandaloneSink;
-import org.flink.harness.WorkflowNode.Kind;
 import org.flink.harness.timer.BackgroundTimerListener;
 import org.flink.harness.timer.ProcessingTimerMode;
 
@@ -22,12 +20,12 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * Fluent builder for {@link StandaloneWorkflow}. Sources are the only entrypoints;
  * sinks are the only collection points. Side outputs route via channel-qualified edges.
+ * Owns registration and execution config; structural validation lives in
+ * {@link WorkflowStreamGraph}.
  */
 public final class WorkflowBuilder {
 
@@ -37,16 +35,13 @@ public final class WorkflowBuilder {
     private final Map<String, StandaloneSink<?>> sinks = new LinkedHashMap<>();
     private final Map<String, TypeInformation<?>> inputTypes = new LinkedHashMap<>();
     private final Map<String, TypeInformation<?>> outputTypes = new LinkedHashMap<>();
-    private final List<DataStreamEdge> edges = new ArrayList<>();
+    private final List<StreamEdge> edges = new ArrayList<>();
     private boolean eagerInit;
 
     private Clock clock = SystemClock.getInstance();
     private ProcessingTimerMode timerMode = ProcessingTimerMode.OPPORTUNISTIC;
     private BackgroundTimerListener bgListener;
     private Map<String, String> globalJobParameters = Map.of();
-
-    // node kind tracking for validation
-    private final Map<String, Kind> nodeKinds = new LinkedHashMap<>();
 
     public WorkflowBuilder(Mode mode) {
         this.mode = mode;
@@ -112,13 +107,13 @@ public final class WorkflowBuilder {
     // --------------------------------------------------------------------------------------------
 
     public WorkflowBuilder registerFunction(String id, Function function) {
-        registerAny(id, function, Kind.FUNCTION);
+        registerAny(id, function);
         return this;
     }
 
     public WorkflowBuilder registerFunction(String id, Function function,
             TypeInformation<?> inputType, TypeInformation<?> outputType) {
-        registerAny(id, function, Kind.FUNCTION);
+        registerAny(id, function);
         inputTypes.put(id, inputType);
         outputTypes.put(id, outputType);
         return this;
@@ -128,13 +123,13 @@ public final class WorkflowBuilder {
      * the static type is {@link KeyedProcessFunction}. Type hints are mandatory here because a
      * keyed function without them is almost always a mistake. */
     public WorkflowBuilder registerFunction(String id, KeyedProcessFunction<?, ?, ?> function) {
-        registerAny(id, function, Kind.FUNCTION);
+        registerAny(id, function);
         return this;
     }
 
     public WorkflowBuilder registerFunction(String id, KeyedProcessFunction<?, ?, ?> function,
             TypeInformation<?> inputType, TypeInformation<?> outputType) {
-        registerAny(id, function, Kind.FUNCTION);
+        registerAny(id, function);
         inputTypes.put(id, keyedNotNull(inputType, "input"));
         outputTypes.put(id, keyedNotNull(outputType, "output"));
         return this;
@@ -146,7 +141,6 @@ public final class WorkflowBuilder {
 
     public WorkflowBuilder addSource(String id) {
         sources.put(requireUnique(id, "source"), new StandaloneSource<>());
-        nodeKinds.put(id, Kind.SOURCE);
         return this;
     }
 
@@ -166,7 +160,6 @@ public final class WorkflowBuilder {
 
     public WorkflowBuilder addSource(String id, StandaloneSource<?, ?> source) {
         sources.put(requireUnique(id, "source"), source);
-        nodeKinds.put(id, Kind.SOURCE);
         return this;
     }
 
@@ -184,7 +177,6 @@ public final class WorkflowBuilder {
 
     public WorkflowBuilder addSink(String id) {
         sinks.put(requireUnique(id, "sink"), new StandaloneSink<>());
-        nodeKinds.put(id, Kind.SINK);
         return this;
     }
 
@@ -196,7 +188,6 @@ public final class WorkflowBuilder {
 
     public WorkflowBuilder addSink(String id, StandaloneSink<?> sink) {
         sinks.put(requireUnique(id, "sink"), sink);
-        nodeKinds.put(id, Kind.SINK);
         return this;
     }
 
@@ -211,7 +202,7 @@ public final class WorkflowBuilder {
     // --------------------------------------------------------------------------------------------
 
     public WorkflowBuilder addEdge(String src, String dst) {
-        edges.add(new DataStreamEdge(src, dst, null, null));
+        edges.add(new StreamEdge(src, dst, null, null));
         return this;
     }
 
@@ -221,7 +212,7 @@ public final class WorkflowBuilder {
         if (keySelector == null) {
             throw new IllegalArgumentException("keySelector must not be null for keyed edge");
         }
-        edges.add(new DataStreamEdge(src, dst, keySelector, null));
+        edges.add(new StreamEdge(src, dst, keySelector, null));
         return this;
     }
 
@@ -231,7 +222,7 @@ public final class WorkflowBuilder {
         if (tag == null) {
             throw new IllegalArgumentException("tag must not be null for side-output edge");
         }
-        edges.add(new DataStreamEdge(src, dst, null, tag));
+        edges.add(new StreamEdge(src, dst, null, tag));
         return this;
     }
 
@@ -244,7 +235,7 @@ public final class WorkflowBuilder {
         if (keySelector == null) {
             throw new IllegalArgumentException("keySelector must not be null for keyed edge");
         }
-        edges.add(new DataStreamEdge(src, dst, keySelector, tag));
+        edges.add(new StreamEdge(src, dst, keySelector, tag));
         return this;
     }
 
@@ -273,11 +264,12 @@ public final class WorkflowBuilder {
     }
 
     /**
-     * Assembles and validates the graph. Anything checkable statically fails here rather than at
-     * run time: mode/timer-mode guards, topology, edge types, and keyed-edge requirements. The one
-     * deferral is opt-out type validation, which turns type errors into per-element
-     * {@code ClassCastException}s instead. Also eagerly opens nodes when requested and collects the
-     * keyed harnesses the workflow uses to fire timers.
+     * Assembles the {@link WorkflowStreamGraph} and wraps it in a {@link StandaloneWorkflow}.
+     * Execution-config guards (mode/timer-mode compatibility) run here; all structural
+     * validation (topology, edge types, keyed-edge requirements) happens inside
+     * {@link WorkflowStreamGraph#create}. The one deferral is opt-out type validation, which
+     * turns type errors into per-element {@code ClassCastException}s instead. Also eagerly opens
+     * nodes when requested.
      */
     public StandaloneWorkflow build(boolean optOutTypeValidation) {
         if (mode == Mode.TRANSIENT && timerMode != ProcessingTimerMode.OPPORTUNISTIC) {
@@ -290,108 +282,30 @@ public final class WorkflowBuilder {
                             + "use setProcessingTimerMode(BACKGROUND, listener)");
         }
 
-        // 1. build harnesses for Flink functions
+        // harnesses for Flink functions; sources and sinks are already StreamNodes
         Map<String, StreamNode> nodes = new LinkedHashMap<>();
         for (Map.Entry<String, Object> entry : functions.entrySet()) {
-            AbstractFunctionHarness<?> functionHarness = HarnessFactory.create(
-                    entry.getKey(), entry.getValue(), clock, mode, globalJobParameters);
-            nodes.put(entry.getKey(), functionHarness);
+            nodes.put(entry.getKey(), HarnessFactory.create(
+                    entry.getKey(), entry.getValue(), clock, mode, globalJobParameters));
         }
+        nodes.putAll(sources);
+        nodes.putAll(sinks);
 
-        // 2. add sources and sinks directly
-        for (Map.Entry<String, StandaloneSource<?, ?>> entry : sources.entrySet()) {
-            nodes.put(entry.getKey(), entry.getValue());
-        }
-        for (Map.Entry<String, StandaloneSink<?>> entry : sinks.entrySet()) {
-            nodes.put(entry.getKey(), entry.getValue());
-        }
-
-        // 3. topology validation
-        validateTopology(nodes);
-
-        // 4. edge type validation
-        for (DataStreamEdge edge : edges) {
-            StreamNode srcNode = requireNode(nodes, edge.src());
-            StreamNode dstNode = requireNode(nodes, edge.dst());
-
-            TypeInformation<?> srcOut = outputTypes.get(edge.src());
-            TypeInformation<?> dstIn = inputTypes.get(edge.dst());
-
-            // side channel: the tag's declared type must match the destination input type
-            if (edge.sideChannel()) {
-                TypeInformation<?> tagType = edge.sideTag().getTypeInfo();
-                if (tagType != null) {
-                    if (dstIn != null && !tagType.equals(dstIn)) {
-                        throw new IllegalStateException(
-                                "side-output edge type mismatch: " + edge.src() + "#" + edge.sideTag()
-                                        + " outputs " + tagType + " but " + edge.dst() + " expects " + dstIn);
-                    }
-                } else if (!optOutTypeValidation) {
-                    throw new IllegalStateException(
-                            "unresolved side-output tag type for " + edge.src() + "\u2192" + edge.dst()
-                                    + " — provide TypeInformation hints or opt out explicitly");
-                }
-            } else {
-                // main channel: known endpoint types must be equal; either side unknown = unresolved
-                boolean known = srcOut != null && dstIn != null;
-                if (known && !srcOut.equals(dstIn)) {
-                    throw new IllegalStateException(
-                            "edge type mismatch: " + edge.src() + " outputs " + srcOut
-                                    + " but " + edge.dst() + " expects " + dstIn);
-                }
-                if (!known && !optOutTypeValidation) {
-                    throw new IllegalStateException(
-                            "unresolved edge type for " + edge.src() + "\u2192" + edge.dst()
-                                    + " — provide TypeInformation hints at registration or opt out explicitly");
-                }
-            }
-
-            // a keyed function is meaningless without a key selector on every inbound edge
-            if (dstNode.requiresKeyedEdge() && !edge.keyed()) {
-                throw new IllegalStateException(
-                        "KeyedProcessFunction " + edge.dst() + " received unkeyed edge from " + edge.src());
-            }
-        }
+        WorkflowStreamGraph graph = WorkflowStreamGraph.create(
+                nodes, edges, sources.keySet(), sinks.keySet(),
+                inputTypes, outputTypes, optOutTypeValidation);
 
         // eager open turns open() failures into build-time failures
         if (eagerInit) {
-            for (StreamNode node : nodes.values()) {
-                node.open();
-            }
+            graph.openAll();
         }
 
-        List<WorkflowNode> graph = buildGraph(nodes);
-        Set<String> sourceIds = Set.copyOf(sources.keySet());
-        Set<String> sinkIds = Set.copyOf(sinks.keySet());
-
-        // collect keyed harnesses for timer management
-        List<KeyedProcessFunctionHarness> keyedHarnesses = nodes.values().stream()
-                .filter(n -> n instanceof KeyedProcessFunctionHarness)
-                .map(n -> (KeyedProcessFunctionHarness) n)
-                .collect(Collectors.toList());
-
-        return new StandaloneWorkflow(
-                nodes, edges, sourceIds, sinkIds, mode, graph,
-                clock, timerMode, keyedHarnesses, bgListener);
+        return new StandaloneWorkflow(graph, mode, clock, timerMode, bgListener);
     }
 
     // --------------------------------------------------------------------------------------------
-    // private helpers (unchanged)
+    // private helpers
     // --------------------------------------------------------------------------------------------
-
-    /** Sources are roots and sinks are leaves; only functions may sit in between. */
-    private void validateTopology(Map<String, StreamNode> nodes) {
-        for (DataStreamEdge edge : edges) {
-            if (nodeKinds.get(edge.dst()) == Kind.SOURCE) {
-                throw new IllegalStateException(
-                        "source node " + edge.dst() + " must not receive inbound edges (edge from " + edge.src() + ")");
-            }
-            if (nodeKinds.get(edge.src()) == Kind.SINK) {
-                throw new IllegalStateException(
-                        "sink node " + edge.src() + " must not have outbound edges (edge to " + edge.dst() + ")");
-            }
-        }
-    }
 
     private String requireUnique(String id, String kind) {
         if (functions.containsKey(id) || sources.containsKey(id) || sinks.containsKey(id)) {
@@ -400,13 +314,12 @@ public final class WorkflowBuilder {
         return id;
     }
 
-    private void registerAny(String id, Object fn, Kind kind) {
+    private void registerAny(String id, Object fn) {
         if (fn == null) {
             throw new IllegalArgumentException("function for " + id + " is null");
         }
         requireUnique(id, "function");
         functions.put(id, fn);
-        nodeKinds.put(id, kind);
     }
 
     private static <T> T keyedNotNull(T value, String what) {
@@ -414,35 +327,5 @@ public final class WorkflowBuilder {
             throw new IllegalArgumentException(what + " type for keyed function is null");
         }
         return value;
-    }
-
-    private static StreamNode requireNode(Map<String, StreamNode> nodes, String id) {
-        StreamNode node = nodes.get(id);
-        if (node == null) {
-            throw new IllegalStateException("unknown node id: " + id);
-        }
-        return node;
-    }
-
-    /** Builds the introspection-only DAG exposed by {@code getWorkflow()}; successors come from edges. */
-    private List<WorkflowNode> buildGraph(Map<String, StreamNode> nodes) {
-        Map<String, List<String>> successors = new LinkedHashMap<>();
-        for (DataStreamEdge edge : edges) {
-            successors.computeIfAbsent(edge.src(), k -> new ArrayList<>()).add(edge.dst());
-        }
-        List<WorkflowNode> result = new ArrayList<>();
-        for (Map.Entry<String, StreamNode> entry : nodes.entrySet()) {
-            String id = entry.getKey();
-            Kind kind = nodeKinds.getOrDefault(id, Kind.FUNCTION);
-            String inType = typeName(inputTypes.get(id));
-            String outType = typeName(outputTypes.get(id));
-            result.add(new WorkflowNode(id, kind, inType, outType,
-                    List.copyOf(successors.getOrDefault(id, List.of()))));
-        }
-        return result;
-    }
-
-    private static String typeName(TypeInformation<?> typeInfo) {
-        return typeInfo == null ? WorkflowNode.UNKNOWN_TYPE : typeInfo.toString();
     }
 }

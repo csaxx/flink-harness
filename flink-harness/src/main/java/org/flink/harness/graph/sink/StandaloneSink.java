@@ -1,7 +1,7 @@
 package org.flink.harness.graph.sink;
 
 import org.apache.flink.util.Collector;
-import org.flink.harness.graph.DataStreamEdge;
+import org.flink.harness.graph.StreamEdge;
 import org.flink.harness.graph.StreamNode;
 import org.flink.harness.graph.RecordingCollector;
 import org.flink.harness.graph.result.FunctionResult;
@@ -41,7 +41,7 @@ public class StandaloneSink<IN> implements StreamNode {
     /** Per-input entry: cast to the declared input type, run {@link #accept}, and
      * return the elements collected by the sink. Lifecycle is the inherited no-op default. */
     @Override
-    public FunctionResult<?> processElement(Object element, DataStreamEdge inboundEdge) {
+    public FunctionResult<?> processElement(Object element, StreamEdge inboundEdge) {
         collector.clear();
         try {
             @SuppressWarnings("unchecked")

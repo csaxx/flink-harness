@@ -50,7 +50,7 @@ Package map (working tree; do not trust older docs):
 
 ```
 org.flink.harness            WorkflowBuilder, StandaloneWorkflow, Mode, WorkflowNode
-org.flink.harness.graph      StreamNode, DataStreamEdge, StandaloneRuntimeContext,
+org.flink.harness.graph      StreamNode, StreamEdge, StandaloneRuntimeContext,
                              RecordingCollector
 org.flink.harness.graph.function   AbstractFunctionHarness, HarnessFactory
 org.flink.harness.graph.function.single   AbstractSingleStreamFunctionHarness,
@@ -82,7 +82,7 @@ choice unless marked otherwise.)
 | Concern | Real Flink | Here | Why |
 |---|---|---|---|
 | Cluster topology | JobManager + TaskManagers + network | None; one JVM, one thread per workflow call | Offline/demo/embedded use; no distributed execution |
-| Graph construction | `StreamGraph` → `JobGraph` → `ExecutionGraph` | `WorkflowBuilder` builds a flat node map + `List<DataStreamEdge>` | No scheduler to target |
+| Graph construction | `StreamGraph` → `JobGraph` → `ExecutionGraph` | `WorkflowBuilder` builds a flat node map + `List<StreamEdge>` | No scheduler to target |
 | Operator chaining | fused `StreamTask` operator chains | Every node is an independent `StreamNode` invoked per element | Simplicity; elements are plain Java objects, no serialization at edges |
 | Parallelism | configurable | Always 1 (`TaskInfo.getNumberOfParallelSubtasks() == 1`) | Avoiding key redistribution/repartitioning |
 | State backend | pluggable backends + checkpointing (`HeapKeyedStateBackend`, `HashMapStateBackend`) | Plain in-memory per-key `HashMap`, no serialization, no checkpoints/savepoints | No persistence layer; state is per-process |
