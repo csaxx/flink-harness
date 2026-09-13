@@ -3,20 +3,24 @@ package org.flink.harness.graph.function.rich;
 import org.apache.flink.api.common.functions.AbstractRichFunction;
 import org.apache.flink.api.common.functions.OpenContext;
 import org.apache.flink.api.java.functions.KeySelector;
+import org.apache.flink.metrics.MetricGroup;
 import org.flink.harness.graph.DataStreamEdge;
 import org.flink.harness.graph.StandaloneRuntimeContext;
 import org.flink.harness.graph.function.AbstractFunctionHarness;
 import org.flink.harness.graph.result.FunctionResult;
+import org.flink.harness.metrics.StandaloneOperatorMetricGroup;
 import org.flink.harness.state.InMemoryKeyedStateStore;
 
 import java.util.Map;
 
 /**
  * Base for harnesses wrapping an {@link AbstractRichFunction}. Adds the rich-function
- * lifecycle (runtime-context wiring plus exactly-once {@link #open()}/{@link #close()}) and
- * key binding with keyed-state scoping on top of {@link AbstractFunctionHarness}: on a keyed
- * edge the element's key is bound before invocation, mirroring Flink where any rich function
- * on a keyed stream may use keyed state (only non-keyed streams throw).
+ * lifecycle (runtime-context wiring plus exactly-once {@link #open()}/{@link #close()}),
+ * key binding with keyed-state scoping, and the per-node metric group on top of
+ * {@link AbstractFunctionHarness}: on a keyed edge the element's key is bound before
+ * invocation, mirroring Flink where any rich function on a keyed stream may use keyed
+ * state (only non-keyed streams throw). Metrics live here because only a rich function
+ * receives a {@code RuntimeContext} and thus a metric group.
  *
  * @param <F> the wrapped Flink function type
  */
@@ -27,19 +31,34 @@ public abstract class AbstractRichFunctionHarness<F extends AbstractRichFunction
 
     private final StandaloneRuntimeContext runtimeContext;
     private final InMemoryKeyedStateStore stateStore;
+    private final StandaloneOperatorMetricGroup metricGroup;
     private Object currentKey;
     private boolean opened;
 
     protected AbstractRichFunctionHarness(
             String id, F function, Map<String, String> globalJobParameters) {
         super(id, function);
+        this.metricGroup = new StandaloneOperatorMetricGroup(id);
         this.runtimeContext =
-                new StandaloneRuntimeContext(id, globalJobParameters, operatorMetricGroup());
+                new StandaloneRuntimeContext(id, globalJobParameters, metricGroup);
         this.stateStore = runtimeContext.stateStore();
     }
 
     protected final StandaloneRuntimeContext runtimeContext() {
         return runtimeContext;
+    }
+
+    public final StandaloneOperatorMetricGroup metricGroup() {
+        return metricGroup;
+    }
+
+    public final Map<String, Object> metricsSnapshot() {
+        return metricGroup.snapshot();
+    }
+
+    @Override
+    public void resetMetrics() {
+        metricGroup.resetCounters();
     }
 
     protected final boolean isOpened() {

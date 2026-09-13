@@ -1,21 +1,15 @@
 package org.flink.harness.graph;
 
-import org.apache.flink.metrics.MetricGroup;
 import org.flink.harness.graph.function.AbstractFunctionHarness;
 import org.flink.harness.graph.sink.StandaloneSink;
 import org.flink.harness.graph.source.StandaloneSource;
 import org.flink.harness.graph.result.FunctionResult;
-
-import java.util.Map;
 
 /**
  * Minimal contract consumed by {@link org.flink.harness.StandaloneWorkflow}.
  * Implemented by {@link AbstractFunctionHarness} for Flink functions and by
  * {@link StandaloneSource} /
  * {@link StandaloneSink} for synthetic graph nodes.
- *
- * <p>Public because package visibility does not cross packages; not part of the
- * consumer API — implement this only through the provided abstract classes.
  */
 public interface StreamNode {
 
@@ -38,8 +32,4 @@ public interface StreamNode {
     default boolean requiresKeyedEdge() {
         return false;
     }
-
-    Map<String, Object> metricsSnapshot();
-
-    MetricGroup metricGroup();
 }

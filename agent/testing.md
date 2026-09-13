@@ -112,8 +112,8 @@ Document these if you change them; add a test if the behavior is intentional:
 - Workflow-level `FunctionResult.sideOutputs` always empty / `WorkflowResult.sideOutputsOf`
   always empty (only sink outputs are asserted).
 - v1 State TTL silently ignored (only v2 TTL rejection is tested).
-- Custom-counter / gauge / meter / histogram non-reset; source/sink metric non-reset in
-  TRANSIENT; IO-metric-group non-snapshotting.
+- Custom-counter / gauge / meter / histogram non-reset; source/sink and non-rich
+  function metric absence; IO-metric-group non-snapshotting.
 - Gauge name-collision and counter/gauge name-collision behavior in `StandaloneMetricGroup`.
 - Background timer thread's lock/no-interleaving guarantee under sustained concurrency.
 - `getJobInfo()` returning a `null` job id.

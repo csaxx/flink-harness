@@ -40,7 +40,7 @@ If you change any of these, update this section AND re-evaluate all code.
 
 | Capability | Status |
 |---|---|
-| Metrics (Counter, Gauge, Meter) | ✔ implement |
+| Metrics (Counter, Gauge, Meter) | ✔ rich functions only, via `RuntimeContext.getMetricGroup()`; plain functions and synthetic source/sink have no metric group |
 | Side outputs (OutputTag) | ✔ implement (routable as side-channel edges to any node) |
 | v1 state (Value/List/Map/Reducing/Aggregating) via `RuntimeContext.get*State(v1)` | ✔ in-memory per-key maps, no serialization |
 | v2 state (`org.apache.flink.api.common.state.v2.*`) | ✔ in-memory per-key, eager `StateFuture`/`StateIterator`; TTL-enabled descriptors rejected (UOE) |
@@ -59,16 +59,17 @@ If you change any of these, update this section AND re-evaluate all code.
 
 - **`StreamNode`** interface (`org.flink.harness.graph`) consumed by `StandaloneWorkflow`. Implemented by:
   - `AbstractFunctionHarness<F extends Function>` (abstract) — wraps a constructor-injected Flink
-    function (`getFunction()`), owns the node identity and per-node metric group. No lifecycle.
+    function (`getFunction()`) and owns the node identity. No lifecycle, no metrics.
   - `AbstractSingleStreamFunctionHarness<F extends Function>` (abstract) — shared output buffer and
     result assembly for the non-rich single-stream interfaces; one concrete per type:
     `MapFunctionHarness`, `FlatMapFunctionHarness`, `FilterFunctionHarness`.
   - `AbstractRichFunctionHarness<F extends AbstractRichFunction>` (abstract) — adds the
-    `RuntimeContext` wiring, open/close lifecycle, key binding and keyed-state scoping
-    (Flink-faithful: any rich function on a keyed edge may use keyed state; only non-keyed
-    streams throw in Flink). Concrete: `ProcessFunctionHarness`, `KeyedProcessFunctionHarness`
-    (timers), `RichMapFunctionHarness`, `RichFlatMapFunctionHarness`, `RichFilterFunctionHarness`.
-  - `StandaloneSource` / `StandaloneSink` — synthetic nodes with no-op lifecycle and own metric group.
+    `RuntimeContext` wiring, open/close lifecycle, key binding, keyed-state scoping and the
+    per-node metric group (Flink-faithful: any rich function on a keyed edge may use keyed
+    state; only non-keyed streams throw in Flink). Concrete: `ProcessFunctionHarness`,
+    `KeyedProcessFunctionHarness` (timers), `RichMapFunctionHarness`,
+    `RichFlatMapFunctionHarness`, `RichFilterFunctionHarness`.
+  - `StandaloneSource` / `StandaloneSink` — synthetic nodes with no-op lifecycle; no metrics.
 - `Context` and `OnTimerContext` are **non-static inner classes** — instantiated through the wrapped function instance (same technique as Flink operator internals).
 - `open()` is idempotent via an `opened` flag: called eagerly at `build()` under
   `initializeAtBuild()`, lazily on the first element otherwise. `KeyedProcessFunctionHarness.open()`
@@ -115,7 +116,7 @@ new WorkflowBuilder(mode)
   .build()
 ```
 
-`process(inputs, sourceId)` returns `WorkflowResult(functionResults, aggregatedMetrics)` — functionResults is a `Map<nodeId, FunctionResult<Object>>` for nodes that produced outputs (sinks) or metrics; `aggregatedMetrics` is a flat cross-node map where counters/meters/histograms are summed and gauges last-wins.
+`process(inputs, sourceId)` returns `WorkflowResult(functionResults, aggregatedMetrics)` — functionResults is a `Map<nodeId, FunctionResult<Object>>` for nodes that produced outputs (sinks) or rich-function metrics; `aggregatedMetrics` is a flat cross-node map where counters/meters/histograms are summed and gauges last-wins.
 
 Modes: `CONTINUOUS` (metrics & state accumulate like real Flink; manual `resetState(id)` / `resetStateAll()` / `resetMetrics(id)` / `resetMetricsAll()`) and `TRANSIENT` (everything cleared after each `process()` call, including on exception via try/finally).
 
@@ -187,6 +188,10 @@ All operators run with parallelism-1 semantics (single "subtask"). No key redist
 - **Update this file on every change** that touches design, module structure,
   version pins, or supported features.
 - Record decisions (reason), not prose.
+- **Fix issues you encounter**: always correct issues, inconsistencies and stale
+  references in the code or docs that you find while working on a task — but first
+  indicate the problem to the user and get confirmation before changing anything
+  beyond the immediate task.
 - **No dates in documentation** — no "added on" stamps, no dated section headers, no
   dated decision records. Chronology belongs to git history, not to prose.
 - **Comment discipline**: non-trivial classes/methods carry a concise
@@ -207,7 +212,7 @@ All operators run with parallelism-1 semantics (single "subtask"). No key redist
     `AbstractRichFunctionHarness`, `AbstractUdfStreamOperator` ↔
     `AbstractSingleStreamFunctionHarness` with one concrete harness per non-rich single-stream
     function type). Locate functionality where the wrapped type actually provides it:
-    lifecycle, `RuntimeContext` and keyed state exist only on the rich branch.
+    lifecycle, `RuntimeContext`, keyed state and metrics exist only on the rich branch.
   - Constructor injection over post-construction wiring: everything a node needs
     (function, clock, global job parameters) arrives via the constructor — no `set*`
     calls at build time.
@@ -224,6 +229,15 @@ All operators run with parallelism-1 semantics (single "subtask"). No key redist
   inspecting local jars. Note that in Flink 2.x `KeyedProcessFunction`/`TimerService`
   live in `flink-runtime` and `RuntimeContext` in `flink-core`, not in
   `flink-streaming-java`.
+
+## Git rules
+
+- **Use `git mv` for every move or rename** — never delete-and-add, so history is
+  preserved.
+- **Never prepare or create commits yourself** unless the user explicitly asks. Do
+  not stage (`git add`) or commit.
+- **Propose a commit message after each task**: a concise, itemized (bulleted) message
+  capturing the essence of the work — not a per-file changelog of detailed changes.
 
 ## `/agent` reference system
 

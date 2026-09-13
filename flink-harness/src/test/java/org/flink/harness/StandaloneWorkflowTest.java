@@ -368,59 +368,6 @@ class StandaloneWorkflowTest {
     }
 
     @Test
-    void customSourceMetricsAvailable() {
-        StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
-                .addSource("in", new StandaloneSource<String, String>() {
-                    private Counter counter;
-                    @Override
-                    protected void init() {
-                        counter = getMetricGroup().counter("sourceIn");
-                    }
-                    @Override
-                    protected void process(String element, Collector<Object> out) throws Exception {
-                        counter.inc();
-                        out.collect(element);
-                    }
-                }, TypeInformation.of(String.class), TypeInformation.of(String.class))
-                .registerFunction("id", new Passive())
-                .addSink("out")
-                .addSourceEdge("in", "id")
-                .addEdge("id", "out")
-                .build(true);
-
-        WorkflowResult result = wf.process(List.of("x", "y"), "in");
-        assertThat(result.functionResults().get("in").metrics()).containsEntry("sourceIn", 2L);
-        wf.close();
-    }
-
-    @Test
-    void sinkMetricsAvailable() {
-        StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
-                .addSource("in", TypeInformation.of(String.class))
-                .registerFunction("id", new Passive())
-                .addSink("out", new StandaloneSink<String>() {
-                    private Counter counter;
-                    @Override
-                    protected void init() {
-                        counter = getMetricGroup().counter("received");
-                    }
-                    @Override
-                    protected void accept(String element, Collector<Object> collected) throws Exception {
-                        counter.inc();
-                        collected.collect(element);
-                    }
-                })
-                .addSourceEdge("in", "id")
-                .addEdge("id", "out")
-                .build(true);
-
-        WorkflowResult result = wf.process(List.of("a", "b", "c"), "in");
-        assertThat(result.outputsOf("out")).containsExactly("a", "b", "c");
-        assertThat(result.functionResults().get("out").metrics()).containsEntry("received", 3L);
-        wf.close();
-    }
-
-    @Test
     void multiSourceMultiSinkWorkflow() {
         StandaloneWorkflow wf = new WorkflowBuilder(Mode.CONTINUOUS)
                 .addSource("srcA", TypeInformation.of(String.class))

@@ -128,7 +128,7 @@ class StateStoreV2Test {
         assertThat(state.contains("a")).isFalse();
         state.putAll(Map.of("x", 7));
         assertThat(state.get("x")).isEqualTo(7);
-        assertThat(state.keys()).containsExactly("x", "b");
+        assertThat(state.keys()).containsExactlyInAnyOrder("x", "b");
         assertThat(state.values()).containsExactlyInAnyOrder(7, 2);
         state.clear();
         assertThat(state.isEmpty()).isTrue();

@@ -79,7 +79,7 @@ class AbstractSingleStreamFunctionHarnessTest {
 
         harness.open();
         harness.close();
-        assertThat(harness.metricsSnapshot()).isEmpty();
+        assertThat(harness.processElement("x", null).metrics()).isEmpty();
     }
 
     /** Proves the HarnessFactory dispatch: plain interfaces registered via WorkflowBuilder

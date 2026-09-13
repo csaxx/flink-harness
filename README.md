@@ -166,7 +166,7 @@ wf.close();  // calls close() on all nodes (idempotent, guarded by lock)
 | KeyedProcessFunction | ✔ |
 | RichMapFunction / RichFlatMapFunction / RichFilterFunction | ✔ |
 | MapFunction / FlatMapFunction / FilterFunction (non-rich) | ✔ no lifecycle, no RuntimeContext — like Flink |
-| Metrics (Counter, Gauge, Meter) via `RuntimeContext.getMetricGroup()` | ✔ |
+| Metrics (Counter, Gauge, Meter) via `RuntimeContext.getMetricGroup()` | ✔ rich functions only; non-rich functions and synthetic source/sink have none |
 | Side outputs (OutputTag) — routable to any node | ✔ |
 | Keyed state v1 (ValueState, ListState, MapState, ReducingState, AggregatingState) | ✔ in-memory per-key, no serialization |
 | StandaloneSource / StandaloneSink — subclassable, default passthrough | ✔ |
@@ -241,15 +241,15 @@ WorkflowBuilder — typed edges, key selectors, type validation
         ▼
 StandaloneWorkflow — BFS execution, locking, mode management
   ├── StreamNode implementations
-  │     ├── AbstractFunctionHarness    → wraps any Flink Function: identity + metric group
+  │     ├── AbstractFunctionHarness    → wraps any Flink Function: identity only
   │     │     ├── SingleStreamFunctionHarness → non-rich Map/FlatMap/Filter (no lifecycle)
-  │     │     └── AbstractRichFunctionHarness → lifecycle, RuntimeContext, key binding, keyed state
+  │     │     └── AbstractRichFunctionHarness → lifecycle, RuntimeContext, key binding, keyed state, metrics
   │     │           ├── ProcessFunctionHarness
   │     │           ├── KeyedProcessFunctionHarness
   │     │           └── RichMap/FlatMap/FilterFunctionHarness
-  │     ├── StandaloneSource       → synthetic source node
-  │     └── StandaloneSink         → synthetic terminal node
-  ├── StandaloneRuntimeContext     → InMemoryKeyedStateStore (metric group lives on the harness)
+  │     ├── StandaloneSource       → synthetic source node (no metrics)
+  │     └── StandaloneSink         → synthetic terminal node (no metrics)
+  ├── StandaloneRuntimeContext     → InMemoryKeyedStateStore (metric group owned by the rich harness)
   ├── RecordingCollector           → captures main + side outputs
   └── WorkflowResult               → outputs, side outputs, aggregated metrics
 ```

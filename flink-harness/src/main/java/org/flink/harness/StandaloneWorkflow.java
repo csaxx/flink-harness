@@ -9,8 +9,8 @@ import org.apache.flink.util.clock.Clock;
 import org.flink.harness.graph.DataStreamEdge;
 import org.flink.harness.graph.StreamNode;
 import org.flink.harness.graph.function.AbstractFunctionHarness;
+import org.flink.harness.graph.function.rich.AbstractRichFunctionHarness;
 import org.flink.harness.graph.function.rich.KeyedProcessFunctionHarness;
-import org.flink.harness.metrics.StandaloneMetricGroup;
 import org.flink.harness.graph.result.FunctionResult;
 import org.flink.harness.graph.result.WorkflowResult;
 import org.flink.harness.timer.BackgroundTimerListener;
@@ -326,7 +326,7 @@ public final class StandaloneWorkflow {
         for (Map.Entry<String, StreamNode> entry : nodes.entrySet()) {
             String id = entry.getKey();
             List<Object> outs = List.copyOf(outputsAgg.getOrDefault(id, List.of()));
-            Map<String, Object> metricSnap = entry.getValue().metricsSnapshot();
+            Map<String, Object> metricSnap = metricsOf(entry.getValue());
 
             boolean hasOutputs = !outs.isEmpty();
             boolean hasMetrics = !metricSnap.isEmpty();
@@ -339,12 +339,23 @@ public final class StandaloneWorkflow {
         return new WorkflowResult(results, aggregated);
     }
 
+    /** Only rich functions carry metrics; every other node contributes an empty snapshot. */
+    private static Map<String, Object> metricsOf(StreamNode node) {
+        if (node instanceof AbstractRichFunctionHarness<?> richHarness) {
+            return richHarness.metricsSnapshot();
+        }
+        return Map.of();
+    }
+
     /** Cross-node flat metrics. Counters/meters/histograms are summed and gauges are last-wins in
      * node registration order; metric names collide across nodes by design (no node namespacing). */
     private Map<String, Object> aggregateAllMetrics() {
         Map<String, Object> aggregated = new LinkedHashMap<>();
         for (StreamNode node : nodes.values()) {
-            for (Map.Entry<String, Metric> entry : metricInstances(node).entrySet()) {
+            if (!(node instanceof AbstractRichFunctionHarness<?> richHarness)) {
+                continue;
+            }
+            for (Map.Entry<String, Metric> entry : metricInstances(richHarness).entrySet()) {
                 String name = entry.getKey();
                 Metric metric = entry.getValue();
                 if (metric instanceof Gauge<?> gauge) {
@@ -361,8 +372,8 @@ public final class StandaloneWorkflow {
         return aggregated;
     }
 
-    private Map<String, Metric> metricInstances(StreamNode node) {
-        return ((StandaloneMetricGroup) node.metricGroup()).metricInstances();
+    private Map<String, Metric> metricInstances(AbstractRichFunctionHarness<?> richHarness) {
+        return richHarness.metricGroup().metricInstances();
     }
 
     // --------------------------------------------------------------------------------------------

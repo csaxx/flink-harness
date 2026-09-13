@@ -49,7 +49,7 @@ public abstract class AbstractSingleStreamFunctionHarness<F extends Function>
         } catch (Exception exception) {
             throw new RuntimeException(operationName + " failed in " + getId(), exception);
         }
-        return new FunctionResult<>(List.copyOf(outputs), Map.of(), metricsSnapshot());
+        return new FunctionResult<>(List.copyOf(outputs), Map.of(), Map.of());
     }
 
     protected abstract void invoke(Object element) throws Exception;

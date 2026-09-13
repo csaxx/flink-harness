@@ -23,12 +23,12 @@ emulated.
 ```
 StandaloneWorkflow
    └── StreamNode                        (only interface the workflow knows)
-         ├── AbstractFunctionHarness<F extends Function>   (abstract; identity + metric group)
+         ├── AbstractFunctionHarness<F extends Function>   (abstract; identity)
          │     ├── SingleStreamFunctionHarness<F>   (abstract; output buffer + result assembly)
          │     │     ├── MapFunctionHarness              (non-rich)
          │     │     ├── FlatMapFunctionHarness          (non-rich)
          │     │     └── FilterFunctionHarness           (non-rich)
-         │     └── AbstractRichFunctionHarness<F>   (abstract; lifecycle + key binding + keyed state)
+         │     └── AbstractRichFunctionHarness<F>   (abstract; lifecycle + key binding + keyed state + metrics)
          │           ├── ProcessFunctionHarness
          │           ├── KeyedProcessFunctionHarness   (+ timers)
          │           ├── RichMapFunctionHarness
@@ -42,8 +42,9 @@ The hierarchy mirrors Flink's own shape (`Function` ↔ `AbstractFunctionHarness
 `AbstractRichFunction` ↔ `AbstractRichFunctionHarness`, `AbstractUdfStreamOperator`
 ↔ `SingleStreamFunctionHarness` with one concrete per non-rich single-stream
 function type). Functionality lives where the wrapped type provides it: lifecycle,
-`RuntimeContext` and keyed state exist only on the rich branch; non-rich functions
-get neither (exactly like Flink).
+`RuntimeContext`, keyed state and metrics exist only on the rich branch; non-rich
+functions and synthetic sources/sinks get none of these (exactly like a plain Flink
+function, which has no `RuntimeContext`).
 
 ## StreamNode contract
 
@@ -54,29 +55,32 @@ get neither (exactly like Flink).
 - `open()` — default no-op; called eagerly at build time under `initializeAtBuild()`.
 - `close()`, `resetState()`, `resetMetrics()`, `resetAll()` (resetState+resetMetrics).
 - `requiresKeyedEdge()` — default `false`; `true` only for keyed functions.
-- `metricsSnapshot()`, `metricGroup()` — introspection.
+
+`StreamNode` deliberately carries **no metrics**: only the rich branch has a
+`RuntimeContext` and thus a metric group. `StandaloneWorkflow` discovers
+metric-bearing nodes by checking `instanceof AbstractRichFunctionHarness`.
 
 Public only because package visibility does not cross packages. Implement it through
 the provided abstract classes.
 
-## AbstractFunctionHarness — what every function node has
+## AbstractFunctionHarness — identity only, no metrics
 
 `flink-harness/src/main/java/org/flink/harness/graph/function/AbstractFunctionHarness.java`
 
-`AbstractFunctionHarness<F extends Function>` holds per node: `id`, the
-constructor-injected `function` (exposed via `getFunction()`), and the per-node
-`StandaloneOperatorMetricGroup` (exposed via `metricGroup()`/`metricsSnapshot()`,
-reset via `resetMetrics()`). It implements no lifecycle — `open()`/`close()` stay
-`StreamNode` no-ops. Its `processElement(element, edge)` simply delegates to the
-subtype-specific `processElement(element)`; the rich branch overrides the public
-method to add key binding and lazy open first.
+`AbstractFunctionHarness<F extends Function>` holds per node: `id` and the
+constructor-injected `function` (exposed via `getFunction()`). It mirrors Flink's plain
+`Function` interface, which has no `RuntimeContext` — so no lifecycle, no metrics. Its
+`processElement(element, edge)` simply delegates to the subtype-specific
+`processElement(element)`; the rich branch overrides the public method to add key
+binding, lazy open and metrics. `open()`/`close()`/`resetState()`/`resetMetrics()` stay
+`StreamNode` no-ops.
 
-The metric group lives here (not in `StandaloneRuntimeContext`) so that even
-non-rich functions — which never see a runtime context — still satisfy the
-`StreamNode` metrics contract. The rich branch passes this same group into the
-`StandaloneRuntimeContext` it creates (`StandaloneRuntimeContext(id, params,
-metricGroup)`), so a function's registered metrics and the node's snapshot are
-always the same group.
+The per-node metric group lives one level down, on `AbstractRichFunctionHarness` (not
+here), so that only functions with a `RuntimeContext` can report metrics — matching
+Flink, where `getMetricGroup()` is reached through the runtime context. The rich branch
+injects that group into the `StandaloneRuntimeContext` it creates
+(`StandaloneRuntimeContext(id, params, metricGroup)`), so a function's registered
+metrics and the node's snapshot are always the same group.
 
 ## SingleStreamFunctionHarness — non-rich map/flatMap/filter
 
@@ -103,10 +107,11 @@ wrapping (`RuntimeException("<op> failed in <id>")`), matching the rich variants
 
 `flink-harness/src/main/java/org/flink/harness/graph/function/AbstractRichFunctionHarness.java`
 
-`AbstractRichFunctionHarness<F extends AbstractRichFunction>` adds: one
-`StandaloneRuntimeContext` (created with the constructor-injected global job
-parameters and the node's metric group), the `opened` flag, `open()`/`close()`,
-and key/state management.
+`AbstractRichFunctionHarness<F extends AbstractRichFunction>` adds: the per-node
+`StandaloneOperatorMetricGroup`, one `StandaloneRuntimeContext` (created with the
+constructor-injected global job parameters and that metric group), the `opened`
+flag, `open()`/`close()`, key/state management, and the metric accessors
+`metricGroup()` / `metricsSnapshot()` / `resetMetrics()`.
 
 `processElement(element, edge)` on `AbstractRichFunctionHarness` runs in this exact
 order — preserve it:
@@ -227,12 +232,11 @@ New supported types are added here.
 
 - Subclass and override `protected void process(IN element, Collector<Object> out)`;
   default emits the element unchanged.
-- `init()` / `dispose()` are lifecycle hooks called once on first input / at close.
-- `getMetricGroup()` exposes a per-instance `StandaloneOperatorMetricGroup` for
-  subclass metrics — the only way custom nodes report metrics.
+- No lifecycle hooks — `open()`/`close()` are the inherited `StreamNode` no-ops.
+- No metric group: a synthetic source is not a rich function, so it cannot report
+  metrics.
 - `processElement` casts the element to `IN`, calls `process`, and returns the recorded
-  outputs. Failure → `RuntimeException("StandaloneSource process failed")`.
-- `open()` just runs `init()` once (flag-guarded).
+  outputs with an empty metrics map. Failure → `RuntimeException("StandaloneSource process failed")`.
 - `requiresKeyedEdge()` is inherited `false`; sources cannot be keyed destinations
   (topology forbids inbound edges).
 
@@ -258,14 +262,18 @@ node and `clear()` the backing list before each invocation.
 
 ## Invariants and contracts
 
-- Lifecycle order is `setRuntimeContext` → `open` → per-element invocations → `close`.
+- Lifecycle order is `setRuntimeContext` → `open` → per-element invocations → `close`;
+  synthetic source/sink nodes have no lifecycle at all.
 - `open` runs at most once per node; lazy first-element path has the real key bound,
-  eager path has a dummy key (keyed functions only).
+  eager path has a dummy key (keyed functions only). Synthetic source/sink nodes
+  override nothing and inherit the `StreamNode` no-op defaults.
 - Per-invocation output buffers are cleared before every `processElement`/`onTimer`;
   the returned lists are immutable copies.
-- A source/sink subclass must not assume its `init()`/`dispose()` runs more than once.
 - Only `KeyedProcessFunctionHarness` requires a keyed edge; all
   `AbstractRichFunctionHarness` subtypes can *use* keyed state on a keyed edge.
+- Metrics exist only on `AbstractRichFunctionHarness` nodes (via the injected
+  `RuntimeContext`); non-rich functions and synthetic sources/sinks always report an
+  empty metrics map.
 - The contexts must be created via the function instance's inner classes.
 
 ## Important implementation patterns
@@ -278,7 +286,8 @@ node and `clear()` the backing list before each invocation.
   "processElement failed in", "onTimer failed in") so failures are attributable.
 - Keep generic casts inside the subtype constructors; the public `processElement`
   stays typed.
-- Subclassable nodes expose lifecycle hooks and a metric group, not internal buffers.
+- Synthetic nodes expose no metric group and no internal buffers; there are no lifecycle
+  hooks. Metrics are a rich-only capability reached through the `RuntimeContext`.
 
 ## Raw-cast confinement policy
 
@@ -311,6 +320,8 @@ public API layer.
   only wiring.
 - `close()` is not followed by any cleanup/job-finalization; metric snapshots are
   taken before close.
+- Synthetic sources/sinks have no metrics, unlike Flink source/sink operators (they are
+  convenience nodes, not rich functions).
 
 ## Common pitfalls / agent traps
 
@@ -370,7 +381,7 @@ public API layer.
   supplies to its function.
 - [state.md](./state.md) — the store `AbstractRichFunctionHarness` binds keys into.
 - [timers.md](./timers.md) — `KeyedProcessFunctionHarness`'s `TimerHeap`/service.
-- [metrics.md](./metrics.md) — the metric group exposed by functions and nodes.
+- [metrics.md](./metrics.md) — the metric group exposed by rich functions.
 - [testing.md](./testing.md) — fixture inventory.
 
 ## External references
