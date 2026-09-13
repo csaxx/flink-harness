@@ -145,7 +145,7 @@ documented.
 transformations without a harness. Unlike map/flatMap/filter they are stateful:
 the *operator* (not the function) holds the running value per key — upstream does
 this inside `StreamGroupedReduce` / `StreamGroupedAggregate`. That is why they
-were deliberately not folded into `SingleStreamFunctionHarness`: a non-rich
+were deliberately not folded into `AbstractSingleStreamFunctionHarness`: a non-rich
 function must not see keyed state, but the harness holding it on the function's
 behalf is the faithful split.
 

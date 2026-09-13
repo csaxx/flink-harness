@@ -4,8 +4,6 @@ import org.apache.flink.api.common.functions.RichFlatMapFunction;
 import org.flink.harness.graph.RecordingCollector;
 import org.flink.harness.graph.result.FunctionResult;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -15,8 +13,7 @@ import java.util.Map;
 public final class RichFlatMapFunctionHarness
         extends AbstractRichFunctionHarness<RichFlatMapFunction<Object, Object>> {
 
-    private final List<Object> outputs = new ArrayList<>();
-    private final RecordingCollector<Object> collector = new RecordingCollector<>(outputs);
+    private final RecordingCollector<Object> collector = new RecordingCollector<>();
 
     public RichFlatMapFunctionHarness(String id, RichFlatMapFunction<?, ?> function) {
         this(id, function, Map.of());
@@ -28,16 +25,16 @@ public final class RichFlatMapFunctionHarness
         super(id, (RichFlatMapFunction<Object, Object>) function, globalJobParameters);
     }
 
-    /** Reuses the per-node output buffer, so it must be cleared before every invocation. */
+    /** Reuses the collector's per-node buffer, so it must be cleared before every invocation. */
     @Override
     protected FunctionResult<?> processElement(Object element) {
-        outputs.clear();
+        collector.clear();
         try {
             getFunction().flatMap(element, collector);
         } catch (Exception exception) {
             throw new RuntimeException("flatMap failed in " + getId(), exception);
         }
-        return new FunctionResult<>(List.copyOf(outputs), Map.of(), metricsSnapshot());
+        return new FunctionResult<>(collector.recorded(), Map.of(), metricsSnapshot());
     }
 
     @Override

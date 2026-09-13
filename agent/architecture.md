@@ -52,8 +52,11 @@ Package map (working tree; do not trust older docs):
 org.flink.harness            WorkflowBuilder, StandaloneWorkflow, Mode, WorkflowNode
 org.flink.harness.graph      StreamNode, DataStreamEdge, StandaloneRuntimeContext,
                              RecordingCollector
-org.flink.harness.graph.function   AbstractFunctionHarness, SingleStreamFunctionHarness,
-                             AbstractRichFunctionHarness, HarnessFactory, *Harness
+org.flink.harness.graph.function   AbstractFunctionHarness, HarnessFactory
+org.flink.harness.graph.function.single   AbstractSingleStreamFunctionHarness,
+                             MapFunctionHarness, FlatMapFunctionHarness, FilterFunctionHarness
+org.flink.harness.graph.function.rich     AbstractRichFunctionHarness, ProcessFunctionHarness,
+                             KeyedProcessFunctionHarness, RichMap/FlatMap/FilterFunctionHarness
 org.flink.harness.graph.result     FunctionResult, WorkflowResult
 org.flink.harness.graph.source     StandaloneSource, JsonSource
 org.flink.harness.graph.sink       StandaloneSink, JsonSink

@@ -6,8 +6,6 @@ import org.flink.harness.graph.StreamNode;
 import org.flink.harness.graph.RecordingCollector;
 import org.flink.harness.graph.result.FunctionResult;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -19,8 +17,7 @@ import java.util.Map;
  */
 public class StandaloneSource<IN, OUT> implements StreamNode {
 
-    private final List<Object> outputs = new ArrayList<>();
-    private final RecordingCollector<Object> collector = new RecordingCollector<>(outputs);
+    private final RecordingCollector<Object> collector = new RecordingCollector<>();
 
     /**
      * Override to transform or generate elements. Default: emit the input element as-is.
@@ -39,7 +36,7 @@ public class StandaloneSource<IN, OUT> implements StreamNode {
      * return the emitted elements. Lifecycle is the inherited no-op default. */
     @Override
     public FunctionResult<?> processElement(Object element, DataStreamEdge inboundEdge) {
-        outputs.clear();
+        collector.clear();
         try {
             @SuppressWarnings("unchecked")
             IN typed = (IN) element;
@@ -47,6 +44,6 @@ public class StandaloneSource<IN, OUT> implements StreamNode {
         } catch (Exception exception) {
             throw new RuntimeException("StandaloneSource process failed", exception);
         }
-        return new FunctionResult<>(List.copyOf(outputs), Map.of(), Map.of());
+        return new FunctionResult<>(collector.recorded(), Map.of(), Map.of());
     }
 }

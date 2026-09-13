@@ -19,7 +19,7 @@ public final class MapFunctionHarness
     protected void invoke(Object element) throws Exception {
         Object mapped = getFunction().map(element);
         if (mapped != null) {
-            outputs().add(mapped);
+            collector().collect(mapped);
         }
     }
 }

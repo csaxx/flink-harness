@@ -76,7 +76,7 @@ If you change any of these, update this section AND re-evaluate all code.
   binds a dummy placeholder key when no key is bound yet (eager path) so state-handle
   registration cannot fail; the first keyed element replaces it.
 - `close()` called when the workflow is torn down.
-- Main and side outputs are captured per invocation inside each harness (`Context.output` records side outputs); `RecordingCollector` is a trivial list-backed `Collector`.
+- Main and side outputs are captured per invocation inside each harness (`Context.output` records side outputs); `RecordingCollector` is a list-backed `Collector` owning the per-node output buffer, cleared before each invocation and snapshotted via `recorded()`.
 - **Type-safe public surface, raw types inside** — unchecked `@SuppressWarnings` is confined
   to narrow boundary helpers: key-selector invocation (`AbstractRichFunctionHarness.bindKey`),
   function casts in the harness constructors, source/sink passthrough casts,
@@ -171,7 +171,7 @@ All operators run with parallelism-1 semantics (single "subtask"). No key redist
 |---|---|
 | `org.flink.harness` | Consumer API — `WorkflowBuilder`, `StandaloneWorkflow`, `WorkflowNode`, `Mode` |
 | `org.flink.harness.graph` | Implementation — `StreamNode` (interface), `DataStreamEdge`, `StandaloneRuntimeContext`, `RecordingCollector` |
-| `org.flink.harness.graph.function` | Nodes — `AbstractFunctionHarness` → `AbstractSingleStreamFunctionHarness` / `AbstractRichFunctionHarness` → concrete harnesses, `HarnessFactory` (public, not API) |
+| `org.flink.harness.graph.function[.single/.rich]` | Nodes — `AbstractFunctionHarness` → `AbstractSingleStreamFunctionHarness` / `AbstractRichFunctionHarness` → concrete harnesses, `HarnessFactory` (public, not API) |
 | `org.flink.harness.graph.result` | Results — `FunctionResult`, `WorkflowResult` |
 | `org.flink.harness.graph.source` | `StandaloneSource`, `JsonSource` — public API, subclassable |
 | `org.flink.harness.graph.sink` | `StandaloneSink`, `JsonSink` — public API, subclassable |

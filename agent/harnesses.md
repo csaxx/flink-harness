@@ -3,7 +3,7 @@
 ## Purpose
 
 Explains how Flink `Function` instances are wrapped as graph nodes: the
-`StreamNode` contract, the `AbstractFunctionHarness` → `SingleStreamFunctionHarness` /
+`StreamNode` contract, the `AbstractFunctionHarness` → `AbstractSingleStreamFunctionHarness` /
 `AbstractRichFunctionHarness` split, the rich-function lifecycle and key binding,
 the non-static `Context` construction technique, the supported function types,
 and the synthetic source/sink nodes. This is where Flink's operator lifecycle is
@@ -24,7 +24,7 @@ emulated.
 StandaloneWorkflow
    └── StreamNode                        (only interface the workflow knows)
          ├── AbstractFunctionHarness<F extends Function>   (abstract; identity)
-         │     ├── SingleStreamFunctionHarness<F>   (abstract; output buffer + result assembly)
+         │     ├── AbstractSingleStreamFunctionHarness<F>   (abstract; output buffer + result assembly)
          │     │     ├── MapFunctionHarness              (non-rich)
          │     │     ├── FlatMapFunctionHarness          (non-rich)
          │     │     └── FilterFunctionHarness           (non-rich)
@@ -40,7 +40,7 @@ StandaloneWorkflow
 
 The hierarchy mirrors Flink's own shape (`Function` ↔ `AbstractFunctionHarness`,
 `AbstractRichFunction` ↔ `AbstractRichFunctionHarness`, `AbstractUdfStreamOperator`
-↔ `SingleStreamFunctionHarness` with one concrete per non-rich single-stream
+↔ `AbstractSingleStreamFunctionHarness` with one concrete per non-rich single-stream
 function type). Functionality lives where the wrapped type provides it: lifecycle,
 `RuntimeContext`, keyed state and metrics exist only on the rich branch; non-rich
 functions and synthetic sources/sinks get none of these (exactly like a plain Flink
@@ -82,13 +82,13 @@ injects that group into the `StandaloneRuntimeContext` it creates
 (`StandaloneRuntimeContext(id, params, metricGroup)`), so a function's registered
 metrics and the node's snapshot are always the same group.
 
-## SingleStreamFunctionHarness — non-rich map/flatMap/filter
+## AbstractSingleStreamFunctionHarness — non-rich map/flatMap/filter
 
-`flink-harness/src/main/java/org/flink/harness/graph/function/SingleStreamFunctionHarness.java`
+`flink-harness/src/main/java/org/flink/harness/graph/function/single/AbstractSingleStreamFunctionHarness.java`
 
 Abstract; one final concrete per interface (`MapFunctionHarness`,
 `FlatMapFunctionHarness`, `FilterFunctionHarness`). Shared machinery: a per-node
-output buffer + `RecordingCollector`, and the `processElement(Object)` template —
+`RecordingCollector` output buffer, and the `processElement(Object)` template —
 clear buffer → `invoke(element)` → immutable `FunctionResult`. The operation name
 (`"map"`/`"flatMap"`/`"filter"`) is constructor-injected and used for error
 wrapping (`RuntimeException("<op> failed in <id>")`), matching the rich variants.
@@ -256,9 +256,11 @@ extends it.
 
 ### `RecordingCollector`
 
-`flink-harness/src/main/java/org/flink/harness/graph/RecordingCollector.java` — the
-trivial `Collector<T>` appending to a backing list. Harnesses reuse one instance per
-node and `clear()` the backing list before each invocation.
+`flink-harness/src/main/java/org/flink/harness/graph/RecordingCollector.java` — a
+list-backed `Collector<T>` owning its per-node buffer. `Collector` has two abstract
+methods (`collect`/`close`), so a lambda cannot stand in; each harness reuses one
+instance per node, clears it before every invocation, and snapshots it with
+`recorded()` (an immutable copy — the buffer itself is never exposed).
 
 ## Invariants and contracts
 
@@ -279,7 +281,7 @@ node and `clear()` the backing list before each invocation.
 ## Important implementation patterns
 
 - Add capabilities to `AbstractFunctionHarness` (all functions),
-  `SingleStreamFunctionHarness` (non-rich) or `AbstractRichFunctionHarness` (rich)
+  `AbstractSingleStreamFunctionHarness` (non-rich) or `AbstractRichFunctionHarness` (rich)
   and select them in `HarnessFactory`; do not special-case concrete harness types
   in `WorkflowBuilder`.
 - Wrap checked exceptions with the node id and operation ("open() failed for",
@@ -339,7 +341,8 @@ public API layer.
 - **Assuming side outputs are available on all function types.** Only
   `ProcessFunction`/`KeyedProcessFunction` expose `ctx.output`.
 - **Adding a function type without a `HarnessFactory` branch** — build fails.
-- **Returning the mutable backing list** from a harness; always `List.copyOf`.
+- **Returning the mutable backing list** from a harness; use `collector.recorded()`
+  (or `List.copyOf`) so results are immutable.
 - **Forgetting Jackson is `provided`** when using `JsonSource`/`JsonSink` in the library.
 
 ## Testing and verification
@@ -351,7 +354,7 @@ public API layer.
   capture, metric snapshot, `resetAll`.
 - `flink-harness/.../functions/RichFunctionHarnessesTest` — map null-drop, flatMap
   collector, filter pass/drop, and keyed state in a `RichMapFunction` on a keyed edge.
-- `flink-harness/.../functions/SingleStreamFunctionHarnessTest` — non-rich map
+- `flink-harness/.../functions/AbstractSingleStreamFunctionHarnessTest` — non-rich map
   (incl. null-drop), flatMap collector, filter pass/drop, error wrapping, no
   lifecycle, workflow-level dispatch via `WorkflowBuilder`, keyed edge into a
   non-rich map.

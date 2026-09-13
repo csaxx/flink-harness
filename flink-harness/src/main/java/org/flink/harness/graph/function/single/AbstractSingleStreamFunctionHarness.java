@@ -5,8 +5,6 @@ import org.flink.harness.graph.RecordingCollector;
 import org.flink.harness.graph.function.AbstractFunctionHarness;
 import org.flink.harness.graph.result.FunctionResult;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -24,32 +22,27 @@ public abstract class AbstractSingleStreamFunctionHarness<F extends Function>
         extends AbstractFunctionHarness<F> {
 
     private final String operationName;
-    private final List<Object> outputs = new ArrayList<>();
-    private final RecordingCollector<Object> collector = new RecordingCollector<>(outputs);
+    private final RecordingCollector<Object> collector = new RecordingCollector<>();
 
     protected AbstractSingleStreamFunctionHarness(String id, F function, String operationName) {
         super(id, function);
         this.operationName = operationName;
     }
 
-    protected final List<Object> outputs() {
-        return outputs;
-    }
-
     protected final RecordingCollector<Object> collector() {
         return collector;
     }
 
-    /** Reuses the per-node output buffer, so it must be cleared before every invocation. */
+    /** Reuses the collector's per-node buffer, so it must be cleared before every invocation. */
     @Override
     protected FunctionResult<?> processElement(Object element) {
-        outputs.clear();
+        collector.clear();
         try {
             invoke(element);
         } catch (Exception exception) {
             throw new RuntimeException(operationName + " failed in " + getId(), exception);
         }
-        return new FunctionResult<>(List.copyOf(outputs), Map.of(), Map.of());
+        return new FunctionResult<>(collector.recorded(), Map.of(), Map.of());
     }
 
     protected abstract void invoke(Object element) throws Exception;

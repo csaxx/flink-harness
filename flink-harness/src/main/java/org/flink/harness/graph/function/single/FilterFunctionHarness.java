@@ -17,7 +17,7 @@ public final class FilterFunctionHarness
     @Override
     protected void invoke(Object element) throws Exception {
         if (getFunction().filter(element)) {
-            outputs().add(element);
+            collector().collect(element);
         }
     }
 }

@@ -25,8 +25,7 @@ public final class KeyedProcessFunctionHarness
 
     private final KeyedProcessFunction<Object, Object, Object>.Context context;
     private final KeyedProcessFunction<Object, Object, Object>.OnTimerContext onTimerContext;
-    private final List<Object> mainOutputs = new ArrayList<>();
-    private final RecordingCollector<Object> mainCollector = new RecordingCollector<>(mainOutputs);
+    private final RecordingCollector<Object> mainCollector = new RecordingCollector<>();
     private final Map<OutputTag<?>, List<Object>> sideOutputs = new LinkedHashMap<>();
 
     private final TimerHeap timerHeap = new TimerHeap();
@@ -111,10 +110,10 @@ public final class KeyedProcessFunctionHarness
         super.open();
     }
 
-    /** Reuses the per-node output buffers, so they must be cleared before every invocation. */
+    /** Reuses the collector's per-node output buffer, so it must be cleared before every invocation. */
     @Override
     protected FunctionResult<?> processElement(Object element) {
-        mainOutputs.clear();
+        mainCollector.clear();
         sideOutputs.clear();
         try {
             getFunction().processElement(element, context, mainCollector);
@@ -127,7 +126,7 @@ public final class KeyedProcessFunctionHarness
     /** Workflow-only entry point for a due timer. Binds the timer's key and timestamp so state and
      * {@code ctx.getCurrentKey()} are correct inside {@code onTimer}. */
     public FunctionResult<?> fireTimer(TimerHeap.TimerEntry entry) {
-        mainOutputs.clear();
+        mainCollector.clear();
         sideOutputs.clear();
         setCurrentKey(entry.key());
         onTimerTimestamp = entry.timestamp();
@@ -162,6 +161,6 @@ public final class KeyedProcessFunctionHarness
     private FunctionResult<?> buildResult() {
         Map<OutputTag<?>, List<?>> sideCopy = new LinkedHashMap<>();
         sideOutputs.forEach((tag, list) -> sideCopy.put(tag, new ArrayList<>(list)));
-        return new FunctionResult<>(List.copyOf(mainOutputs), sideCopy, metricsSnapshot());
+        return new FunctionResult<>(mainCollector.recorded(), sideCopy, metricsSnapshot());
     }
 }

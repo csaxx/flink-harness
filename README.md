@@ -211,7 +211,7 @@ Features **planned** for future versions:
 |---------|----------|
 | `org.flink.harness` | Consumer API — `WorkflowBuilder`, `StandaloneWorkflow`, `WorkflowNode`, `Mode` |
 | `org.flink.harness.graph` | Implementation — `StreamNode` (interface), `DataStreamEdge`, `StandaloneRuntimeContext`, `RecordingCollector` |
-| `org.flink.harness.graph.function` | Nodes — `AbstractFunctionHarness` + subtypes, `HarnessFactory` |
+| `org.flink.harness.graph.function[.single/.rich]` | Nodes — `AbstractFunctionHarness` + subtypes, `HarnessFactory` |
 | `org.flink.harness.graph.result` | `FunctionResult`, `WorkflowResult` — output containers |
 | `org.flink.harness.graph.source` | `StandaloneSource`, `JsonSource` — subclassable source base classes |
 | `org.flink.harness.graph.sink` | `StandaloneSink`, `JsonSink` — subclassable sink base classes |
@@ -242,7 +242,7 @@ WorkflowBuilder — typed edges, key selectors, type validation
 StandaloneWorkflow — BFS execution, locking, mode management
   ├── StreamNode implementations
   │     ├── AbstractFunctionHarness    → wraps any Flink Function: identity only
-  │     │     ├── SingleStreamFunctionHarness → non-rich Map/FlatMap/Filter (no lifecycle)
+  │     │     ├── AbstractSingleStreamFunctionHarness → non-rich Map/FlatMap/Filter (no lifecycle)
   │     │     └── AbstractRichFunctionHarness → lifecycle, RuntimeContext, key binding, keyed state, metrics
   │     │           ├── ProcessFunctionHarness
   │     │           ├── KeyedProcessFunctionHarness
@@ -250,6 +250,6 @@ StandaloneWorkflow — BFS execution, locking, mode management
   │     ├── StandaloneSource       → synthetic source node (no metrics)
   │     └── StandaloneSink         → synthetic terminal node (no metrics)
   ├── StandaloneRuntimeContext     → InMemoryKeyedStateStore (metric group owned by the rich harness)
-  ├── RecordingCollector           → captures main + side outputs
+  ├── RecordingCollector           → owns per-node main-output buffer
   └── WorkflowResult               → outputs, side outputs, aggregated metrics
 ```
